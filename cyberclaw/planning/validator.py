@@ -15,6 +15,8 @@ from cyberclaw.planning.models import (
     RequirementCandidate,
 )
 from cyberclaw.specialists.registry import SpecialistRegistry
+from cyberclaw.policy.engine import PolicyEngine
+from cyberclaw.policy.models import AuthorizationDecisionType, PolicyExecutionContext
 
 
 class PlanValidationResult(BaseModel):
@@ -40,6 +42,7 @@ class PlanValidator:
         capabilities: CapabilityRegistry,
         permissions: PermissionManager,
         actor: str = "core.system",
+        policy_engine: Optional[PolicyEngine] = None,
     ) -> PlanValidationResult:
         rejection_reasons: List[str] = []
         struct_valid = True
@@ -93,7 +96,29 @@ class PlanValidator:
                 rejection_reasons.append(f"Actor '{actor}' lacks required permission '{perm}'")
                 perm_valid = False
 
-        # 4. Safety & Evasion Validation
+        # 4. Policy Authorization Pre-Check
+        if policy_engine and candidate.required_capability:
+            cap = capabilities.get_capability(candidate.required_capability)
+            lifecycle = cap.lifecycle_state.value if cap else "AVAILABLE"
+            trust = cap.trust_state.value if cap else "TRUSTED_WITH_SCOPE"
+            ctx = PolicyExecutionContext(
+                investigation_id=investigation.id,
+                case_stage=investigation.current_state.value,
+                actor_id=actor,
+                actor_role="system" if actor == "core.system" else "analyst",
+                capability_id=candidate.required_capability,
+                action_scope=candidate.risk_classification.value,
+                lifecycle_state=lifecycle,
+                trust_state=trust,
+            )
+            decision = policy_engine.authorize(ctx)
+            if decision.decision == AuthorizationDecisionType.DENY:
+                rejection_reasons.append(
+                    f"Candidate rejected by policy ({decision.decision.value}): {'; '.join(decision.reasons)}"
+                )
+                safe_valid = False
+
+        # 5. Safety & Evasion Validation
         restricted_patterns = ["eval(", "exec(", "system(", "__import__", "rm -rf", "drop table"]
         cand_str = f"{candidate.purpose} {candidate.expected_information_value} {candidate.target_or_entity}".lower()
         for p in restricted_patterns:
@@ -120,13 +145,22 @@ class PlanValidator:
         capabilities: CapabilityRegistry,
         permissions: PermissionManager,
         actor: str = "core.system",
+        policy_engine: Optional[PolicyEngine] = None,
     ) -> PlanValidationResult:
         """Validate all candidates in an InvestigationPlan."""
         all_rejections: List[str] = []
         is_all_valid = True
 
         for candidate in plan.candidate_next_requirements:
-            res = cls.validate_candidate(candidate, investigation, specialists, capabilities, permissions, actor)
+            res = cls.validate_candidate(
+                candidate,
+                investigation,
+                specialists,
+                capabilities,
+                permissions,
+                actor,
+                policy_engine=policy_engine,
+            )
             if not res.is_valid:
                 is_all_valid = False
                 all_rejections.extend(res.rejection_reasons)

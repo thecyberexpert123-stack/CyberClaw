@@ -41,6 +41,20 @@ from cyberclaw.specialists.base import Specialist
 from cyberclaw.specialists.endpoint import SpecialistRequest
 from cyberclaw.specialists.registry import SpecialistRegistry
 from cyberclaw.validation.pipeline import ValidationPipeline
+from cyberclaw.policy.engine import PolicyEngine
+from cyberclaw.policy.models import (
+    ActorRole,
+    AuthorizationDecision,
+    AuthorizationDecisionType,
+    PolicyExecutionContext,
+    RiskLevel,
+)
+from cyberclaw.policy.errors import (
+    ApprovalRequiredError,
+    AuthorizationDeniedError,
+    PolicyValidationError,
+    SupervisionRequiredError,
+)
 
 
 class CyberClawCore:
@@ -85,6 +99,39 @@ class CyberClawCore:
             planner=self.planner,
             validator=self.plan_validator,
         )
+
+        # Initialize Policy Engine
+        self.policy_engine = PolicyEngine()
+
+    def _resolve_actor_role(self, actor: str) -> str:
+        """Resolve an actor identifier to a recognized ActorRole value."""
+        if actor == "core.system" or actor.startswith("system."):
+            return ActorRole.SYSTEM.value
+        if actor.startswith("specialist.") or actor == "specialist":
+            return ActorRole.SPECIALIST.value
+        if actor.startswith("lead.") or actor.startswith("lead_investigator") or actor == "lead":
+            return ActorRole.LEAD_INVESTIGATOR.value
+        if actor.startswith("operator.") or actor == "operator":
+            return ActorRole.OPERATOR.value
+        if actor.startswith("auditor.") or actor == "auditor":
+            return ActorRole.AUDITOR.value
+        if "analyst" in actor:
+            return ActorRole.ANALYST.value
+
+        # Check assigned roles in permission manager
+        roles = self.permissions.get_roles(actor)
+        if "admin" in roles or "lead_investigator" in roles:
+            return ActorRole.LEAD_INVESTIGATOR.value
+        if "specialist" in roles:
+            return ActorRole.SPECIALIST.value
+        if "operator" in roles:
+            return ActorRole.OPERATOR.value
+        if "auditor" in roles:
+            return ActorRole.AUDITOR.value
+        if "analyst" in roles:
+            return ActorRole.ANALYST.value
+
+        return ActorRole.ANALYST.value
 
     @property
     def is_running(self) -> bool:
@@ -370,16 +417,21 @@ class CyberClawCore:
         scope: ActionScope = ActionScope.CONSEQUENTIAL,
         approval_granted: bool = False,
         custom_lesson: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        policy_id: Optional[str] = None,
+        supervision_acknowledged: bool = False,
+        approval_token: Optional[str] = None,
     ) -> ExecutionResult:
         """Orchestrate the full end-to-end execution lifecycle:
         1. Validate current DFA state, parameters schema, and permissions.
-        2. Route request to Specialist endpoint (or Capability Provider).
-        3. Validate execution result.
-        4. Ingest and index produced structured Evidence.
-        5. Emit structured events across the bus.
-        6. Deterministically update DFA state.
-        7. Record an actionable Experience with conditions, causes, and consequences.
-        8. Persist state, evidence, and experience to isolated workspace.
+        2. Evaluate contextual Policy and assess risk.
+        3. Route request to Specialist endpoint (or Capability Provider).
+        4. Validate execution result.
+        5. Ingest and index produced structured Evidence.
+        6. Emit structured events across the bus.
+        7. Deterministically update DFA state.
+        8. Record an actionable Experience with conditions, causes, and consequences.
+        9. Persist state, evidence, and experience to isolated workspace.
         """
         inv = self.get_investigation(investigation_id, actor=actor)
         if not inv:
@@ -407,6 +459,49 @@ class CyberClawCore:
             scope=scope,
             approval_granted=approval_granted,
         )
+
+        # 2. Contextual Policy Authorization Evaluation & Risk Assessment
+        effective_role = actor_role or self._resolve_actor_role(actor)
+        policy_ctx = PolicyExecutionContext(
+            investigation_id=investigation_id,
+            case_stage=inv.current_state.value,
+            actor_id=actor,
+            actor_role=effective_role,
+            capability_id=capability.id,
+            capability_version=capability.version,
+            action_type="execute",
+            action_scope=scope.value,
+            lifecycle_state=capability.lifecycle_state.value,
+            trust_state=capability.trust_state.value,
+            parameters=parameters,
+            is_branch=getattr(inv, "is_branch", False),
+            branch_id=getattr(inv, "branch_id", None),
+            approval_token=approval_token or ("granted" if approval_granted else None),
+            requires_supervision_acknowledged=supervision_acknowledged,
+        )
+        auth_decision = self.policy_engine.authorize(policy_ctx, policy_id=policy_id)
+        self.policy_engine.record_in_journal(auth_decision, inv.case_manager)
+
+        # Enforce authorization decision
+        if not auth_decision.is_authorized:
+            if auth_decision.decision == AuthorizationDecisionType.REQUIRE_APPROVAL:
+                raise ApprovalRequiredError(
+                    f"Action '{capability_id}' with {scope.value} scope requires explicit approval: {'; '.join(auth_decision.reasons)}",
+                    decision_id=auth_decision.decision_id,
+                    policy_id=auth_decision.policy_id,
+                )
+            elif auth_decision.decision == AuthorizationDecisionType.REQUIRE_SUPERVISION:
+                raise SupervisionRequiredError(
+                    f"Execution requires operational supervision: {'; '.join(auth_decision.reasons)}",
+                    decision_id=auth_decision.decision_id,
+                    policy_id=auth_decision.policy_id,
+                )
+            else:
+                raise AuthorizationDeniedError(
+                    f"Execution denied by policy: {'; '.join(auth_decision.reasons)}",
+                    decision_id=auth_decision.decision_id,
+                    policy_id=auth_decision.policy_id,
+                )
 
         # If DFA was in READY or CLASSIFY, transition to INVESTIGATE
         if inv.current_state in (CoreState.READY, CoreState.CLASSIFY):
@@ -489,6 +584,9 @@ class CyberClawCore:
             lifecycle_state=capability.lifecycle_state.value,
             trust_state=capability.trust_state.value,
             action_scope=scope.value,
+            authorization_decision_id=auth_decision.decision_id,
+            risk_level=auth_decision.risk_assessment.overall_risk.value,
+            policy_id=auth_decision.policy_id,
         )
 
         # Observability for execution
@@ -711,6 +809,7 @@ class CyberClawCore:
             actor=actor,
             max_candidates=max_candidates,
             auto_convert_candidates=auto_convert_candidates,
+            policy_engine=self.policy_engine,
         )
         inv.case_manager.record_plan(plan)
         inv.record_decision(

@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Policy Engine & Risk-Aware Authorization v0.1
+
+### Lesson 12: Contextual Authorization Independent of Static Trust
+- **Observation**: Systems often conflate capability registration and trust tiers with runtime execution permission.
+- **Consequence**: A capability that is fully trusted (e.g. system backup cleanup) could be invoked in an inappropriate investigative stage (e.g. while case is closed or reporting) or by an unprivileged role (e.g. read-only auditor).
+- **Resolution**: Separated capability trust from contextual authorization. The capability declares what it can do; the Policy Engine contextually decides whether it may execute given the current investigation DFA state, actor role, action scope, parameters, and evaluated risk.
+
+### Lesson 13: Deterministic Explainable Risk Decomposition
+- **Observation**: Using opaque LLM-based risk scores or single composite heuristic numbers creates unpredictable authorization decisions that cannot be audited or explained.
+- **Consequence**: Security teams cannot deterministically verify why an action was approved or denied, and edge cases fail silently or inconsistently.
+- **Resolution**: Implemented `RiskEvaluator` using explicit, weighted, deterministic risk factors across orthogonal dimensions (scope, lifecycle, trust, stage, role, branch containment, parameters). Each factor provides an explicit severity level and human-readable explanation, ensuring fail-closed gates when any critical factor triggers.
+
+### Lesson 14: Categorical Precedence in Conflict Resolution
+- **Observation**: When multiple policy rules match an execution context, resolving conflicts via numerical priority alone can lead to accidental overrides where an allow rule unintentionally bypasses safety blocks.
+- **Consequence**: Safety invariants (e.g. "never execute destructive actions in branches" or "never allow auditors to mutate") could be bypassed if an allow rule was assigned a lower numerical priority index.
+- **Resolution**: Enforced strict categorical precedence: `DENY > REQUIRE_APPROVAL > REQUIRE_SUPERVISION > DEFER > ALLOW`. Regardless of rule evaluation order, a hard denial or approval gate will always override an allow verdict.
+
 ## Milestone: Capability Lifecycle & Governance v0.1
 
 ### Lesson 9: Decoupling Lifecycle Availability from Trust Tiers

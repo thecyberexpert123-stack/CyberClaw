@@ -42,6 +42,7 @@ class AdaptivePlanningEngine:
         actor: str = "core.system",
         max_candidates: int = 5,
         auto_convert_candidates: bool = True,
+        policy_engine: Optional[Any] = None,
     ) -> Tuple[InvestigationPlan, PlanValidationResult]:
         """Generate, validate, and optionally convert candidates into executable requirements."""
         # 1. Generate Plan
@@ -60,6 +61,7 @@ class AdaptivePlanningEngine:
             capabilities=capabilities,
             permissions=permissions,
             actor=actor,
+            policy_engine=policy_engine,
         )
 
         # 3. Convert Valid Candidates to InformationRequirements
@@ -92,6 +94,7 @@ class AdaptivePlanningEngine:
         coordinator: InvestigationCoordinator,
         max_cycles: int = 3,
         actor: str = "core.system",
+        policy_engine: Optional[Any] = None,
     ) -> List[InvestigationPlan]:
         """Execute a controlled multi-cycle adaptive investigation loop until an explicit stopping condition."""
         executed_plans: List[InvestigationPlan] = []
@@ -111,6 +114,7 @@ class AdaptivePlanningEngine:
                 permissions=permissions,
                 actor=actor,
                 auto_convert_candidates=True,
+                policy_engine=policy_engine,
             )
             executed_plans.append(plan)
 

@@ -87,12 +87,21 @@ CyberClaw/
 │   ├── workspace/              # Persistent Workspace
 │   │   ├── layout.py           # Standard directory structure (skills, workflows, memory, etc.)
 │   │   └── manager.py          # WorkspaceManager (atomic writes & isolation)
+│   ├── policy/                 # Policy Engine & Risk-Aware Authorization v0.1
+│   │   ├── models.py           # Policy, PolicyRule, PolicyExecutionContext, RiskAssessment, AuthorizationDecision
+│   │   ├── errors.py           # PolicyError, AuthorizationDeniedError, ApprovalRequiredError, SupervisionRequiredError
+│   │   ├── risk.py             # Deterministic explainable RiskEvaluator & RiskFactor decomposition
+│   │   ├── rules.py            # Declarative rule condition matcher & standard baseline rules
+│   │   ├── evaluator.py        # Fail-closed PolicyEvaluator with explicit precedence resolution
+│   │   ├── registry.py         # Thread-safe versioned PolicyRegistry with branch isolation
+│   │   ├── engine.py           # Central PolicyEngine & Case Journal audit coordinator
+│   │   └── authorization.py    # Facade interface & re-exports
 │   ├── validation/             # Multi-phase Validation Pipeline
 │   │   ├── errors.py           # Schema, Policy, State, and Result validation errors
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 116 unit & integration tests covering all requirements
+├── tests/                      # 226 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -385,7 +394,66 @@ The Capability Lifecycle & Governance layer formalizes the operational lifecycle
 
 ---
 
-## 12. Running the Tests
+## 12. Policy Engine & Risk-Aware Authorization v0.1
+
+The Policy Engine formalizes contextual authorization as an independent subsystem, completely decoupled from capability existence or raw trust declarations:
+
+> **CORE GOVERNANCE PRINCIPLES:**
+> 1. **CAPABILITY EXISTENCE ≠ CAPABILITY AUTHORITY**: A capability declaring what it can do does NOT mean it is authorized to execute in this context.
+> 2. **CAPABILITY TRUST ≠ EXECUTION AUTHORIZATION**: Trust is an origin tier; authorization is an operational decision.
+> 3. **TRUST ≠ UNLIMITED PERMISSION**: Even fully trusted capabilities are bound by strict action scopes and actor roles.
+> 4. **PERMISSION ≠ POLICY AUTHORIZATION**: Having a permission grant is necessary but not sufficient; policy evaluates real-time investigation risk and stage constraints.
+> 5. **POLICY AUTHORIZATION ≠ EXECUTION GUARANTEE**: An approved action must still pass DFA transition gates, schema checks, and provider health checks.
+> 6. **EXECUTION ≠ SUCCESS**: An authorized, dispatched execution may still produce an empty or failed outcome.
+
+> *"The capability declares what it can do. The policy engine decides whether it may do it here. The validation pipeline verifies that decision. The DFA controls whether execution is legally possible. The case journal records why it happened."*
+
+### Contextual Authorization Pipeline
+Execution requests proceed through a strict unidirectional sequence:
+```
+Investigation Context
+    ↓
+Requested Action
+    ↓
+Capability + Version + Provider
+    ↓
+Capability Lifecycle / Trust Check (is_executable)
+    ↓
+Contextual Policy Evaluation (PolicyEngine)
+    ↓
+Deterministic Risk Assessment (RiskEvaluator)
+    ↓
+Actor / Role Authorization Check
+    ↓
+Action Scope Authorization Gate
+    ↓
+DFA / Schema / Permission Validation Pipeline
+    ↓
+Execution Decision & Journal Audit Trail
+```
+
+### Key Subsystems & Semantics
+* **Fail-Closed Semantics**:
+  * Unknown policies, missing context, unrecognized roles, unverified providers, or unhandled risk dimensions evaluate to `DENY` or `DEFER`.
+* **Explicit Precedence & Conflict Resolution**:
+  * Rules evaluate strictly deterministically by priority. Conflicting outcomes are reconciled via categorical precedence:
+    $$\text{DENY} > \text{REQUIRE\_APPROVAL} > \text{REQUIRE\_SUPERVISION} > \text{DEFER} > \text{ALLOW}$$
+* **Explainable Risk Decomposition (`RiskEvaluator`)**:
+  * Zero opaque scoring or stochastic LLM evaluation.
+  * Evaluates action scope, capability lifecycle state, trust tier, investigation DFA state, principal role, branch isolation, and parameter risk.
+  * Yields categorical `RiskLevel` (`LOW`, `MODERATE`, `HIGH`, `CRITICAL`, `UNKNOWN`), a normalized weighted score $[0.0 - 1.0]$, and human-readable constituent `RiskFactor` explanations.
+* **Versioned Policy Registry (`PolicyRegistry`)**:
+  * Policies are immutable once registered. Supports explicit version targeting (`policy_id@version`).
+  * Isolated, read-only policy snapshots protect counterfactual branches from modifying authoritative root governance.
+* **Human / Lead Approval & Supervision Workflows**:
+  * `REQUIRE_APPROVAL`: High-risk or destructive actions halt until an authorized human or lead investigator submits an explicit approval token (`request_approval`).
+  * `REQUIRE_SUPERVISION`: Consequential actions by analysts require operational supervision acknowledgment (`acknowledge_supervision`).
+* **Tamper-Evident Audit Trail**:
+  * Every authorization request, risk assessment, and decision outcome is recorded in the immutable Case Journal (`AUTHORIZATION_REQUESTED`, `RISK_ASSESSED`, `AUTHORIZATION_GRANTED`, `AUTHORIZATION_DENIED`, `APPROVAL_REQUESTED`, `AUTHORIZATION_DEFERRED`) and execution history records.
+
+---
+
+## 13. Running the Tests
 
 Install dependencies and run the test suite:
 

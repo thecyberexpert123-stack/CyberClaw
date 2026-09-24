@@ -121,6 +121,17 @@ class ValidationPipeline:
                 "ExecutionResult with status SUCCESS_EMPTY must not contain evidence items."
             )
 
+    @staticmethod
+    def validate_authorization(decision: Any) -> None:
+        """Verify that policy authorization decision permits execution."""
+        if hasattr(decision, "is_authorized") and not decision.is_authorized:
+            reasons = getattr(decision, "reasons", [])
+            dec_val = getattr(getattr(decision, "decision", None), "value", str(decision))
+            msg = f"Policy evaluation denied execution ({dec_val})"
+            if reasons:
+                msg += f": {'; '.join(reasons)}"
+            raise PolicyValidationError(msg)
+
     @classmethod
     def validate_request(
         cls,
@@ -132,6 +143,7 @@ class ValidationPipeline:
         allowed_states: List[CoreState],
         scope: ActionScope = ActionScope.REVERSIBLE,
         approval_granted: bool = False,
+        policy_decision: Optional[Any] = None,
     ) -> None:
         """Execute the full pre-execution validation pipeline."""
         # 0. Lifecycle & Trust Validation
@@ -145,3 +157,6 @@ class ValidationPipeline:
         cls.validate_schema(capability, parameters)
         # 3. Permission Validation
         cls.validate_permissions(capability, actor, permission_manager, scope, approval_granted)
+        # 4. Policy Authorization Validation
+        if policy_decision is not None:
+            cls.validate_authorization(policy_decision)

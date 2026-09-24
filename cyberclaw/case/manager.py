@@ -38,6 +38,33 @@ class CaseManager:
         self.stopping_history: List[StoppingCondition] = []
         self.experience_references: List[str] = []
 
+    @property
+    def decision_history(self) -> List[DecisionRecord]:
+        """Return all decisions from the case journal."""
+        return self.journal.decisions
+
+    def record_decision(
+        self,
+        decision_type: DecisionType,
+        actor: str = "core.system",
+        rationale: str = "",
+        inputs: Optional[Dict[str, Any]] = None,
+        outcome: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> DecisionRecord:
+        """Record an explicit investigative choice in the journal."""
+        combined_meta = dict(metadata or {})
+        combined_meta.update(kwargs)
+        return self.journal.record_decision(
+            decision_type=decision_type,
+            actor=actor,
+            rationale=rationale,
+            inputs=inputs or {},
+            outcome=outcome or {},
+            metadata=combined_meta,
+        )
+
     def record_state_transition(
         self,
         from_state: str,
@@ -81,6 +108,9 @@ class CaseManager:
         permission_scope: str = "reversible",
         action_scope: str = "consequential",
         validation_reference: Optional[str] = None,
+        authorization_decision_id: Optional[str] = None,
+        risk_level: Optional[str] = None,
+        policy_id: Optional[str] = None,
     ) -> ExecutionHistoryRecord:
         """Log specialist execution details."""
         rec = ExecutionHistoryRecord(
@@ -95,6 +125,9 @@ class CaseManager:
             permission_scope=permission_scope,
             action_scope=action_scope,
             validation_reference=validation_reference,
+            authorization_decision_id=authorization_decision_id,
+            risk_level=risk_level,
+            policy_id=policy_id,
             status=status,
             duration_ms=duration_ms,
             evidence_count=evidence_count,

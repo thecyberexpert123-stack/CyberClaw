@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Policy Engine & Risk-Aware Authorization v0.1
+- **`cyberclaw/policy/models.py`**: Domain-agnostic models including `Policy`, `PolicyRule`, `PolicyEffect`, `PolicyExecutionContext`, `AuthorizationDecision`, `AuthorizationDecisionType`, `RiskLevel`, `RiskAssessment`, `RiskFactor`, `ActorRole`, and `PolicyValidationRecord`.
+- **`cyberclaw/policy/errors.py`**: Structured error hierarchy (`PolicyError`, `PolicyNotFoundError`, `PolicyValidationError`, `AuthorizationDeniedError`, `ApprovalRequiredError`, `SupervisionRequiredError`, `PolicyConflictError`, `InvalidPolicyContextError`).
+- **`cyberclaw/policy/risk.py`**: Deterministic, explainable `RiskEvaluator` assessing action scope, lifecycle state, trust state, investigation DFA state, actor role, branch isolation, and dangerous parameter flags.
+- **`cyberclaw/policy/rules.py`**: Declarative condition matching engine (`match_rule_conditions`) and baseline system rules (`create_standard_rules`).
+- **`cyberclaw/policy/evaluator.py`**: Fail-closed `PolicyEvaluator` implementing categorical conflict resolution: `DENY > REQUIRE_APPROVAL > REQUIRE_SUPERVISION > DEFER > ALLOW`.
+- **`cyberclaw/policy/registry.py`**: Version-aware, thread-safe `PolicyRegistry` enforcing policy immutability, default policy management, and read-only isolated snapshots for counterfactual branches.
+- **`cyberclaw/policy/engine.py`**: Central `PolicyEngine` coordinating contextual authorization, lead/human approval workflows (`request_approval`, `reject_approval`), supervision acknowledgment (`acknowledge_supervision`), and Case Journal auditing.
+- **`cyberclaw/case/models.py` & `cyberclaw/case/manager.py`**: Added authorization journal entry types (`AUTHORIZATION_REQUESTED`, `AUTHORIZATION_GRANTED`, `AUTHORIZATION_DENIED`, `AUTHORIZATION_DEFERRED`, `APPROVAL_REQUESTED`, `APPROVAL_GRANTED`, `APPROVAL_REJECTED`, `POLICY_CONFLICT_DETECTED`, `RISK_ASSESSED`) and enhanced `ExecutionHistoryRecord` with `authorization_decision_id`, `risk_level`, and `policy_id`.
+- **Validation & Core Integration**:
+  - `ValidationPipeline.validate_authorization(...)`: Phase enforcing policy decisions during request pre-validation.
+  - `CyberClawCore.execute_action(...)`: Contextual authorization pipeline evaluating risk, enforcing approval/supervision gates, and logging authorization records into case history.
+  - `PlanValidator.validate_candidate(...)`: Speculative policy authorization pre-check for planning candidates.
+- **Comprehensive Test Suite**:
+  - `tests/test_policy_engine.py`: 30 unit and integration tests covering models, risk evaluation, rule matching, fail-closed precedence, versioning, approval workflows, supervision acknowledgment, journal recording, Core dispatch, branch isolation, self-development quarantine, and replay preservation.
+
 ### Added - Capability Lifecycle & Governance v0.1
 - **`cyberclaw/capabilities/models.py`**: Introduced `CapabilityLifecycleState`, `CapabilityTrustState`, `CapabilityHealth`, `CapabilityProvenance`, `CapabilityFailureType`, `CapabilityValidationRecord`, `CapabilityFailureRecord`, `CapabilityGovernanceRecord`, `CapabilityCandidate`, and `CapabilityDiscoveryResult`.
 - **`cyberclaw/capabilities/lifecycle.py`**: State machine enforcing permissible lifecycle transitions (`PROPOSED` -> `EXPERIMENTAL` -> `VALIDATED` -> `AVAILABLE` -> `TRUSTED` -> `DEPRECATED` -> `RETIRED`, with operational control `DISABLED` and rejection `REJECTED`).

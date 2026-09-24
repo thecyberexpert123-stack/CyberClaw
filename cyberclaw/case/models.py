@@ -45,6 +45,8 @@ class DecisionType(str, Enum):
     REQUIREMENT_RESOLUTION = "REQUIREMENT_RESOLUTION"
     CONTRADICTION_ADJUDICATION = "CONTRADICTION_ADJUDICATION"
     STOPPING_CRITERIA = "STOPPING_CRITERIA"
+    AUTHORIZATION_DECISION = "AUTHORIZATION_DECISION"
+    POLICY_EVALUATION = "POLICY_EVALUATION"
 
 
 class JournalEntryType(str, Enum):
@@ -64,6 +66,15 @@ class JournalEntryType(str, Enum):
     DECISION_RECORDED = "DECISION_RECORDED"
     STOPPING_CONDITION = "STOPPING_CONDITION"
     SNAPSHOT_CAPTURED = "SNAPSHOT_CAPTURED"
+    AUTHORIZATION_REQUESTED = "AUTHORIZATION_REQUESTED"
+    AUTHORIZATION_GRANTED = "AUTHORIZATION_GRANTED"
+    AUTHORIZATION_DENIED = "AUTHORIZATION_DENIED"
+    AUTHORIZATION_DEFERRED = "AUTHORIZATION_DEFERRED"
+    APPROVAL_REQUESTED = "APPROVAL_REQUESTED"
+    APPROVAL_GRANTED = "APPROVAL_GRANTED"
+    APPROVAL_REJECTED = "APPROVAL_REJECTED"
+    POLICY_CONFLICT_DETECTED = "POLICY_CONFLICT_DETECTED"
+    RISK_ASSESSED = "RISK_ASSESSED"
 
 
 class DecisionRecord(BaseModel):
@@ -199,6 +210,9 @@ class ExecutionHistoryRecord(BaseModel):
     permission_scope: str = Field(default="reversible", description="Permission scope enforced")
     action_scope: str = Field(default="consequential", description="Action scope enforced")
     validation_reference: Optional[str] = Field(default=None, description="Reference to validation record if applicable")
+    authorization_decision_id: Optional[str] = Field(default=None, description="ID of policy authorization decision")
+    risk_level: Optional[str] = Field(default=None, description="Assessed risk level at execution time")
+    policy_id: Optional[str] = Field(default=None, description="Policy evaluated for this execution")
     status: str
     duration_ms: Optional[float] = None
     evidence_count: int = 0
