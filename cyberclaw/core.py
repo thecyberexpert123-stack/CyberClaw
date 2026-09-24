@@ -17,6 +17,15 @@ from cyberclaw.evidence.models import Evidence
 from cyberclaw.evidence.result import ExecutionResult, ExecutionStatus
 from cyberclaw.investigation import Investigation
 from cyberclaw.memory.experience import ExperienceRecord
+from cyberclaw.case.models import (
+    CaseState,
+    DecisionRecord,
+    DecisionType,
+    InvestigationSnapshot,
+    JournalEntry,
+    JournalEntryType,
+    SnapshotDelta,
+)
 from cyberclaw.memory.store import ExperienceStore
 from cyberclaw.observability.logger import StructuredLogger
 from cyberclaw.permissions.manager import PermissionManager
@@ -174,10 +183,28 @@ class CyberClawCore:
             )
         )
 
-        # Persist to workspace
-        self.workspace.persist_state(inv.id, inv.to_dict())
+        # Record initial case state and capture initial snapshot
+        inv.case_manager.record_state_transition(
+            from_state="INITIALIZE",
+            to_state="READY",
+            event="investigation.initialized",
+            reason=f"Created investigation '{title}'",
+            context={"actor": actor, "investigation_id": inv.id},
+        )
+        inv.capture_snapshot(trigger="investigation_created")
+
+        # Persist full case
+        self._persist_case(inv)
 
         return inv
+
+    def _persist_case(self, inv: Investigation) -> None:
+        """Persist investigation state, evidence, snapshots, journal, and decisions."""
+        self.workspace.persist_state(inv.id, inv.to_dict())
+        self.workspace.persist_evidence(inv.id, inv.evidence_store.list_all())
+        self.workspace.persist_snapshots(inv.id, inv.case_manager.snapshots.snapshots)
+        self.workspace.persist_journal(inv.id, inv.case_manager.journal.entries)
+        self.workspace.persist_decisions(inv.id, inv.case_manager.journal.decisions)
 
     def get_investigation(
         self,
@@ -248,8 +275,16 @@ class CyberClawCore:
                     payload={"from": old_state.value, "to": new_state.value, "event": event},
                 )
             )
-            # Persist state
-            self.workspace.persist_state(investigation_id, inv.to_dict())
+            # Record state transition and capture sealed snapshot
+            inv.case_manager.record_state_transition(
+                from_state=old_state.value,
+                to_state=new_state.value,
+                event=event,
+                reason=f"Transitioned from {old_state.value} to {new_state.value}",
+                context=ctx,
+            )
+            inv.capture_snapshot(trigger=f"state_transition:{new_state.value}")
+            self._persist_case(inv)
             return new_state
         except InvalidTransitionError as ite:
             # Observability for rejected transition
@@ -540,8 +575,25 @@ class CyberClawCore:
             requirement_id=requirement_id,
             parameters=parameters,
         )
-        self.workspace.persist_evidence(investigation_id, inv.evidence_store.list_all())
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+
+        # Record execution history and resolution decision
+        inv.case_manager.record_execution(
+            requirement_id=req.id,
+            specialist_id=req.assigned_specialist_id or "unassigned",
+            capability_id=req.assigned_capability_id or "unassigned",
+            status=req.status.value,
+            duration_ms=None,
+            evidence_count=len(req.resulting_evidence_ids),
+        )
+        inv.record_decision(
+            decision_type=DecisionType.REQUIREMENT_RESOLUTION,
+            actor="core.coordinator",
+            rationale=f"Requirement '{req.id}' reached status {req.status.value}",
+            inputs={"target": req.target_or_entity, "evidence_types": req.evidence_types_sought},
+            outcome={"status": req.status.value, "evidence_count": len(req.resulting_evidence_ids)},
+        )
+        inv.capture_snapshot(trigger=f"requirement_resolved:{req.status.value}")
+        self._persist_case(inv)
         return req
 
     def correlate_investigation(
@@ -555,7 +607,7 @@ class CyberClawCore:
             raise KeyError(f"Investigation '{investigation_id}' not found.")
 
         result = self.coordinator.correlate(inv)
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+        self._persist_case(inv)
         return result
 
     def create_hypothesis(
@@ -575,7 +627,14 @@ class CyberClawCore:
             statement=statement,
             initial_confidence=initial_confidence,
         )
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+        inv.record_decision(
+            decision_type=DecisionType.HYPOTHESIS_TRANSITION,
+            actor="core.coordinator",
+            rationale=f"Hypothesis '{hyp.id}' formulated: '{statement}'",
+            inputs={"statement": statement, "initial_confidence": initial_confidence},
+            outcome={"status": "OPEN", "confidence": initial_confidence},
+        )
+        self._persist_case(inv)
         return hyp
 
     def evaluate_hypotheses(
@@ -589,7 +648,17 @@ class CyberClawCore:
             raise KeyError(f"Investigation '{investigation_id}' not found.")
 
         res = self.coordinator.evaluate_hypotheses(inv)
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+        for hyp in res:
+            inv.record_decision(
+                decision_type=DecisionType.HYPOTHESIS_TRANSITION,
+                actor="core.coordinator",
+                rationale=f"Evaluated hypothesis '{hyp.id}' to status '{hyp.status}' (confidence: {hyp.confidence:.2f})",
+                inputs={"statement": hyp.statement, "supporting_count": len(hyp.supporting_evidence_ids), "refuting_count": len(hyp.refuting_evidence_ids)},
+                outcome={"status": hyp.status, "confidence": hyp.confidence},
+            )
+        if res:
+            inv.capture_snapshot(trigger="hypotheses_evaluated")
+        self._persist_case(inv)
         return res
 
     # --------------------------------------------------------------------------
@@ -617,7 +686,20 @@ class CyberClawCore:
             max_candidates=max_candidates,
             auto_convert_candidates=auto_convert_candidates,
         )
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+        inv.case_manager.record_plan(plan)
+        inv.record_decision(
+            decision_type=DecisionType.PLANNING_SELECTION if val_res.is_valid else DecisionType.PLANNING_REJECTION,
+            actor="core.planner",
+            rationale=plan.reasoning_basis,
+            inputs={"candidates_count": len(plan.candidate_next_requirements), "gaps_count": len(plan.capability_gaps)},
+            outcome={"is_valid": val_res.is_valid, "plan_status": plan.plan_status.value, "stopping_condition": plan.stopping_condition.value if plan.stopping_condition else None},
+        )
+        inv.capture_snapshot(
+            trigger="plan_generated",
+            active_plan_id=plan.plan_id,
+            stopping_condition=plan.stopping_condition.value if plan.stopping_condition else None,
+        )
+        self._persist_case(inv)
         return plan, val_res
 
     def run_adaptive_investigation(
@@ -640,7 +722,103 @@ class CyberClawCore:
             max_cycles=max_cycles,
             actor=actor,
         )
-        self.workspace.persist_evidence(investigation_id, inv.evidence_store.list_all())
-        self.workspace.persist_state(investigation_id, inv.to_dict())
+        for plan in plans:
+            inv.case_manager.record_plan(plan)
+        inv.capture_snapshot(
+            trigger="adaptive_investigation_completed",
+            active_plan_id=plans[-1].plan_id if plans else None,
+            stopping_condition=plans[-1].stopping_condition.value if (plans and plans[-1].stopping_condition) else None,
+        )
+        self._persist_case(inv)
         return plans
+
+    # --------------------------------------------------------------------------
+    # Long-Horizon Case Memory & State Queries
+    # --------------------------------------------------------------------------
+
+    def capture_case_snapshot(
+        self,
+        investigation_id: str,
+        trigger: str = "manual",
+        metadata: Optional[Dict[str, Any]] = None,
+        actor: str = "core.system",
+    ) -> InvestigationSnapshot:
+        """Capture an immutable, sealed snapshot of the investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        snap = inv.capture_snapshot(trigger=trigger, metadata=metadata)
+        self._persist_case(inv)
+        return snap
+
+    def get_case_snapshot(
+        self,
+        investigation_id: str,
+        sequence_or_id: Any,
+        actor: str = "core.system",
+    ) -> Optional[InvestigationSnapshot]:
+        """Retrieve a specific snapshot by sequence or ID."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.get_snapshot(sequence_or_id)
+
+    def list_case_snapshots(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ) -> List[InvestigationSnapshot]:
+        """List all snapshots of an investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.list_snapshots()
+
+    def compare_case_snapshots(
+        self,
+        investigation_id: str,
+        first: Any,
+        second: Any,
+        actor: str = "core.system",
+    ) -> SnapshotDelta:
+        """Compare two snapshots and return an explainable delta."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.compare_snapshots(first, second)
+
+    def explain_case_at(
+        self,
+        investigation_id: str,
+        sequence_or_id: Any,
+        actor: str = "core.system",
+    ) -> Dict[str, Any]:
+        """Explain the complete posture of an investigation at a specific snapshot."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.explain_state_at(sequence_or_id)
+
+    def get_case_timeline(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ) -> List[Dict[str, Any]]:
+        """Retrieve the linear chronological journal timeline for a case."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.get_timeline()
+
+    def get_case_state(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ) -> CaseState:
+        """Retrieve the assembled comprehensive CaseState object."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.get_case_state()
+
 

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from cyberclaw.dfa.machine import CoreDFA
 from cyberclaw.dfa.states import CoreState
@@ -47,6 +47,15 @@ class Investigation(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    _case_manager: Optional[Any] = PrivateAttr(default=None)
+
+    @property
+    def case_manager(self) -> Any:
+        """Internal CaseManager instance coordinating long-horizon memory."""
+        if self._case_manager is None:
+            from cyberclaw.case.manager import CaseManager
+            self._case_manager = CaseManager(self.id)
+        return self._case_manager
 
     @property
     def current_state(self) -> CoreState:
@@ -99,6 +108,89 @@ class Investigation(BaseModel):
         self.information_requirements[req.id] = req
         return req
 
+    # --------------------------------------------------------------------------
+    # Long-Horizon Case State, Snapshots & Decisions
+    # --------------------------------------------------------------------------
+
+    def capture_snapshot(
+        self,
+        trigger: str = "manual",
+        active_plan_id: Optional[str] = None,
+        stopping_condition: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Capture an immutable, sealed point-in-time snapshot of the investigation."""
+        return self.case_manager.capture_snapshot(
+            investigation=self,
+            trigger=trigger,
+            active_plan_id=active_plan_id,
+            stopping_condition=stopping_condition,
+            metadata=metadata,
+        )
+
+    def get_snapshot(self, sequence_or_id: Union[int, str]):
+        """Retrieve a snapshot by sequence index or UUID."""
+        return self.case_manager.snapshots.get(sequence_or_id)
+
+    def list_snapshots(self):
+        """List all captured snapshots chronologically."""
+        return self.case_manager.snapshots.snapshots
+
+    def compare_snapshots(self, first: Union[int, str, Any], second: Union[int, str, Any]):
+        """Compute an explainable delta between two snapshots."""
+        return self.case_manager.snapshots.compare(first, second)
+
+    def record_decision(
+        self,
+        decision_type: Any,
+        actor: str,
+        rationale: str,
+        inputs: Optional[Dict[str, Any]] = None,
+        outcome: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Record an explicit investigative choice with structured rationale."""
+        return self.case_manager.journal.record_decision(
+            decision_type=decision_type,
+            actor=actor,
+            rationale=rationale,
+            inputs=inputs,
+            outcome=outcome,
+            metadata=metadata,
+        )
+
+    def record_journal_entry(
+        self,
+        entry_type: Any,
+        summary: str,
+        reference_id: Optional[str] = None,
+        snapshot_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        """Append an event to the chronological case journal."""
+        return self.case_manager.journal.append_entry(
+            entry_type=entry_type,
+            summary=summary,
+            reference_id=reference_id,
+            snapshot_id=snapshot_id,
+            details=details,
+        )
+
+    def get_timeline(self) -> List[Dict[str, Any]]:
+        """Return serialized chronological timeline."""
+        return self.case_manager.journal.get_timeline()
+
+    def explain_state_at(self, sequence_or_id: Union[int, str]) -> Dict[str, Any]:
+        """Explain the investigative posture at a specific snapshot."""
+        snap = self.get_snapshot(sequence_or_id)
+        if not snap:
+            raise KeyError(f"Snapshot '{sequence_or_id}' not found.")
+        return self.case_manager.snapshots.explain(snap)
+
+    def get_case_state(self):
+        """Assemble the complete CaseState object adhering to the conceptual model."""
+        return self.case_manager.assemble_case_state(self)
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metadata and state to dictionary for persistence."""
         return {
@@ -118,4 +210,7 @@ class Investigation(BaseModel):
             "requirements_count": len(self.information_requirements),
             "contradictions_count": len(self.contradictions),
             "history_count": len(self.dfa.history),
+            "snapshots_count": len(self.case_manager.snapshots.snapshots),
+            "decisions_count": len(self.case_manager.journal.decisions),
+            "journal_count": len(self.case_manager.journal.entries),
         }

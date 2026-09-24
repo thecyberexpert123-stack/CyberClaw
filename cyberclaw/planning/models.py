@@ -119,3 +119,8 @@ class InvestigationPlan(BaseModel):
     planner_version: str = "0.1.0"
     plan_status: PlanStatus = PlanStatus.GENERATED
     stopping_condition: Optional[StoppingCondition] = None
+
+    @property
+    def id(self) -> str:
+        """Convenience alias for plan_id."""
+        return self.plan_id

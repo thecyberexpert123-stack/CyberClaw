@@ -236,7 +236,58 @@ The Adaptive Investigation Planning subsystem enables CyberClaw to autonomously 
 
 ---
 
-## 8. Running the Tests
+## 8. Long-Horizon Investigation Memory & Case State v0.1
+
+The Long-Horizon Investigation Memory & Case State layer enables CyberClaw to maintain an explainable, auditable, and reproducible investigation across multiple planning and execution cycles:
+
+* **Distinct Conceptual Partitions**:
+  CyberClaw strictly distinguishes case-local state, sequential histories, and cross-case global experiences:
+  ```text
+  Case
+  ├── Current Investigation State   (DFA state, current active graph, hypotheses)
+  ├── State History                 (Chronological DFA transitions with context)
+  ├── Evidence Registry             (Catalog of all ingested structured findings)
+  ├── Entity / Relationship Graph   (Observed and inferred topological entities)
+  ├── Hypothesis History            (Lifecycle of hypothesis status & confidence)
+  ├── Requirement History           (Requirements lifecycle and execution linkage)
+  ├── Planning History              (Formal InvestigationPlan artifacts)
+  ├── Execution History             (Specialist execution logs, durations, status)
+  ├── Decision History              (Explicit rationale for all deliberate choices)
+  ├── Contradiction History         (Recorded and resolved conflicting evidence)
+  ├── Stopping History              (Encountered halting criteria)
+  └── Experience References         (Links to global cross-case ExperienceRecords)
+  ```
+* **Durable Sealed Snapshots (`InvestigationSnapshot`)**:
+  * Frozen point-in-time state answering: *"What did CyberClaw know at this point?"*
+  * Monotonically sequenced (`sequence: 1, 2, 3...`) with trigger labels.
+  * Tamper-evident: Every snapshot computes a deterministic SHA-256 state digest (`seal()` and `verify_integrity()`). Any external file modification breaks cryptographic verification.
+  * Deep copy preservation guarantees that subsequent mutations in the live investigation do not alter historic snapshots.
+* **Explainable Delta Comparison (`SnapshotDelta`)**:
+  * `compare_snapshots(seq_a, seq_b)` computes precise deltas:
+    * Newly added evidence IDs.
+    * Newly discovered entities and relationships.
+    * Shift in hypothesis confidence and status (`OPEN` ──→ `SUPPORTED`).
+    * Requirement transitions (`OPEN` ──→ `SATISFIED`).
+    * Discovery or adjudication of contradictions.
+    * DFA state transitions.
+* **Structured Decision Trail (`DecisionRecord`)**:
+  * Explicitly preserves the *why*:
+    * `PLANNING_SELECTION` / `PLANNING_REJECTION`
+    * `HYPOTHESIS_TRANSITION`
+    * `REQUIREMENT_RESOLUTION`
+    * `STATE_TRANSITION`
+    * `STOPPING_CRITERIA`
+* **Chronological Case Journal (`CaseJournal`)**:
+  * Linear append-only audit timeline of all events, decisions, and milestones.
+* **Workspace Persistence**:
+  * Automatically persisted by `WorkspaceManager` into isolated directories:
+    * `snapshots/`: individual JSON snapshots (`snapshot_0001.json`, ...) and index.
+    * `journal/`: `journal.json` and `decisions.json`.
+    * `case_state.json`: full assembled case structure.
+
+---
+
+## 9. Running the Tests
 
 Install dependencies and run the test suite:
 
