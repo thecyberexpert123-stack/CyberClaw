@@ -22,6 +22,8 @@ from cyberclaw.specialists.endpoint import (
     SpecialistRequest,
     SpecialistResponse,
 )
+from cyberclaw.specialists.self_development.maturity import SkillMaturityState
+from cyberclaw.specialists.self_development.skill import ExperimentalSkill
 from cyberclaw.specialists.osint.capabilities.definitions import (
     CAPABILITY_CERT_METADATA,
     CAPABILITY_DNS_LOOKUP,
@@ -80,6 +82,16 @@ class OSINTSpecialist(SpecialistEndpoint):
         self._active_investigations: Dict[str, OSINTInvestigation] = {}
         # Health state
         self._health = SpecialistHealth.HEALTHY
+
+        # Initialize Self-Development Engine
+        from cyberclaw.specialists.self_development.engine import SpecialistSelfDevelopmentEngine
+        self.self_development = SpecialistSelfDevelopmentEngine(
+            specialist_id=self.SPECIALIST_ID,
+            workspace_root=self.workspace.base_path,
+            capability_invoker=self.execute_local_capability,
+            specialist_permissions=["network:read"],
+            known_capabilities=self.list_capabilities(),
+        )
 
         # Register default workflows
         self.register_workflow(DomainTriageWorkflow())
@@ -295,6 +307,45 @@ class OSINTSpecialist(SpecialistEndpoint):
     # --------------------------------------------------------------------------
     # Registration & Configuration
     # --------------------------------------------------------------------------
+
+    def deploy_promoted_skill_as_workflow(self, trusted_skill: ExperimentalSkill) -> None:
+        """Deploy an approved, trusted experimental skill as an active Specialist workflow."""
+        if trusted_skill.maturity != SkillMaturityState.TRUSTED:
+            raise ValueError(f"Skill '{trusted_skill.skill_id}' is not in TRUSTED maturity state.")
+
+        workflow_id = f"osint.skill:{trusted_skill.skill_id}"
+
+        class PromotedSkillWorkflow(OSINTWorkflow):
+            def __init__(self, s: ExperimentalSkill) -> None:
+                super().__init__(id=workflow_id, name=s.skill_id, description=s.purpose)
+                self.skill = s
+
+            def execute(
+                self,
+                parameters: Dict[str, Any],
+                context: ExecutionContext,
+                capability_invoker: Any,
+            ) -> ExecutionResult:
+                all_evidence: List[Evidence] = []
+                steps = self.skill.procedure.get("steps", [])
+                for step in steps:
+                    cap_id = step.get("capability_id")
+                    merged_params = dict(parameters)
+                    merged_params.update(step.get("parameters", {}))
+                    res = capability_invoker(cap_id, merged_params, context)
+                    if res.is_failure:
+                        return res
+                    if res.is_success:
+                        all_evidence.extend(res.evidence)
+
+                return ExecutionResult.success(
+                    evidence=all_evidence,
+                    output={"skill_id": self.skill.skill_id, "version": self.skill.version},
+                    execution_id=context.execution_id,
+                )
+
+        wf = PromotedSkillWorkflow(trusted_skill)
+        self.register_workflow(wf)
 
     def register_provider(self, provider: OSINTProvider) -> None:
         """Register an OSINT capability provider with priority ordering."""

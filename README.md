@@ -40,8 +40,18 @@ CyberClaw/
 │   │   ├── base.py             # Specialist model
 │   │   ├── endpoint.py         # SpecialistEndpoint, SpecialistRequest, SpecialistResponse
 │   │   ├── registry.py         # SpecialistRegistry
+│   │   ├── self_development/  # Self-Development Framework v0.1 (controlled autonomous growth)
+│   │   │   ├── maturity.py     # SkillMaturityState (EXPERIMENTAL -> EVALUATED -> PROPOSED -> APPROVED -> TRUSTED)
+│   │   │   ├── patterns.py     # PatternDetector & PatternObservation
+│   │   │   ├── proposals.py    # SkillProposal
+│   │   │   ├── skill.py        # ExperimentalSkill
+│   │   │   ├── validation.py   # SkillValidator (structural, safety, architectural)
+│   │   │   ├── experiment.py   # ExperimentSandbox & SkillExperiment
+│   │   │   ├── evaluation.py   # SkillEvaluator & SkillEvaluation
+│   │   │   ├── promotion.py    # PromotionManager, PromotionProposal, ApprovalDecision
+│   │   │   └── engine.py       # SpecialistSelfDevelopmentEngine
 │   │   └── osint/              # OSINT Specialist v0.1 (autonomous passive intelligence)
-│   │       ├── specialist.py   # OSINTSpecialist implementing SpecialistEndpoint
+│   │       ├── specialist.py   # OSINTSpecialist implementing SpecialistEndpoint & self-development
 │   │       ├── investigation.py# OSINTInvestigation & target classification
 │   │       ├── dfa/            # Local OSINT DFA (READY -> TARGET_RECEIVED -> CLASSIFY -> PLAN -> COLLECT -> CORRELATE -> VERIFY -> COMPLETE)
 │   │       ├── capabilities/   # Domain metadata, DNS, Cert metadata, WHOIS
@@ -72,7 +82,7 @@ CyberClaw/
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 73 unit & integration tests covering all requirements
+├── tests/                      # 99 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -133,7 +143,33 @@ The OSINT Specialist is the first semi-autonomous specialist operating behind th
 
 ---
 
-## 5. Running the Tests
+## 5. Specialist Self-Development Framework v0.1
+
+The Specialist Self-Development Framework provides controlled, auditable, and safe self-evolution for semi-autonomous specialists:
+
+* **Principle**: *Freedom of creation ≠ freedom of deployment.* AI proposes, validation verifies, policy decides.
+* **Maturity Lifecycle**:
+  ```text
+  EXPERIMENTAL ──→ EVALUATED ──→ PROPOSED ──→ APPROVED ──→ TRUSTED
+  ```
+  * Direct transitions from generated to trusted are strictly prohibited.
+  * Attempting to self-promote without explicit external approval raises `UnauthorizedPromotionError`.
+* **Controlled Pipeline**:
+  1. **Pattern Detection**: `PatternDetector` identifies recurring successes or failures across experiences (`PatternObservation`).
+  2. **Proposal**: `SkillProposal` generated with expected benefits, assumptions, and required capabilities.
+  3. **Validation**: `SkillValidator` enforces structural integrity, authority boundary checks, and architectural non-bypass.
+  4. **Sandbox Experimentation**: `ExperimentSandbox` runs candidate skills alongside baselines without mutating trusted state.
+  5. **Baseline Comparison**: `SkillEvaluator` calculates deltas (evidence yield, duration, failure rates) and produces formal `SkillEvaluation`.
+  6. **Promotion & Approval**: `PromotionManager` requires explicit external policy/human `ApprovalDecision` before moving to `APPROVED`.
+  7. **Deployment**: Approved skills are promoted to `TRUSTED` in the specialist's catalog and registered with Core.
+* **Security Boundaries**:
+  * Candidate skills cannot modify Core source code, DFA transition authority, or permission policies.
+  * Candidate skills cannot escalate permissions or self-promote.
+  * Isolated workspace trees protect production assets from experimental artifacts.
+
+---
+
+## 6. Running the Tests
 
 Install dependencies and run the test suite:
 
