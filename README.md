@@ -39,7 +39,17 @@ CyberClaw/
 │   ├── specialists/            # Specialist registration & endpoint contracts
 │   │   ├── base.py             # Specialist model
 │   │   ├── endpoint.py         # SpecialistEndpoint, SpecialistRequest, SpecialistResponse
-│   │   └── registry.py         # SpecialistRegistry
+│   │   ├── registry.py         # SpecialistRegistry
+│   │   └── osint/              # OSINT Specialist v0.1 (autonomous passive intelligence)
+│   │       ├── specialist.py   # OSINTSpecialist implementing SpecialistEndpoint
+│   │       ├── investigation.py# OSINTInvestigation & target classification
+│   │       ├── dfa/            # Local OSINT DFA (READY -> TARGET_RECEIVED -> CLASSIFY -> PLAN -> COLLECT -> CORRELATE -> VERIFY -> COMPLETE)
+│   │       ├── capabilities/   # Domain metadata, DNS, Cert metadata, WHOIS
+│   │       ├── providers/      # OSINTProvider & deterministic offline mock providers
+│   │       ├── normalizers/    # OSINTNormalizer into structured Evidence
+│   │       ├── workflows/      # Repeatable workflows (e.g. DomainTriageWorkflow)
+│   │       ├── memory/         # Specialist-local memory and experience store
+│   │       └── workspace/      # Specialist-local isolated persistent workspace
 │   ├── evidence/               # Structured Evidence
 │   │   ├── models.py           # Evidence, Observation, Provenance
 │   │   ├── result.py           # ExecutionResult & ExecutionStatus (SUCCESS, SUCCESS_EMPTY, FAILURE)
@@ -62,7 +72,7 @@ CyberClaw/
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 52 unit & integration tests covering all requirements
+├── tests/                      # 73 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -104,7 +114,26 @@ Tests Pass
 
 ---
 
-## 4. Running the Tests
+## 4. OSINT Specialist v0.1
+
+The OSINT Specialist is the first semi-autonomous specialist operating behind the `SpecialistEndpoint` contract:
+
+* **Local Autonomy**: Maintains its own local DFA (`OSINTDFA`), local investigation state, target classifier (`classify_target`), local memory, and isolated workspace (`workspace/specialists/osint/`).
+* **Safe, Non-Offensive Capabilities**:
+  * `osint.domain_metadata`: Registrar, status, nameservers, registration dates.
+  * `osint.dns_lookup`: A, AAAA, MX, TXT, and NS resource records.
+  * `osint.cert_metadata`: Subject alternative names (SANs), issuer, certificate validity.
+  * `osint.whois_lookup`: Registrant country, organization, admin contact.
+* **Workflows & Skills**:
+  * `DomainTriageWorkflow` (`osint.workflow:domain_triage`): Multi-step passive reconnaissance correlating domain targets into relationships (`resolves_to_ip`, `delegated_to_nameserver`).
+* **Deterministic Providers**:
+  * Prioritized provider resolution with readiness evaluation (`is_ready`) and automatic operational fallback.
+  * Strict distinction between `SUCCESS`, `SUCCESS_EMPTY`, and `FAILURE`.
+* **Zero Core Pollution**: Core contains zero OSINT-specific imports or conditionals, validated by multi-specialist coexistence tests with Network Specialist.
+
+---
+
+## 5. Running the Tests
 
 Install dependencies and run the test suite:
 
