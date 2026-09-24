@@ -96,12 +96,24 @@ CyberClaw/
 │   │   ├── registry.py         # Thread-safe versioned PolicyRegistry with branch isolation
 │   │   ├── engine.py           # Central PolicyEngine & Case Journal audit coordinator
 │   │   └── authorization.py    # Facade interface & re-exports
+│   ├── runtime/                # Durable Event-Driven Investigation Runtime v0.1
+│   │   ├── models.py           # RuntimeEvent, RuntimeTask, TaskStatus, TaskPriority, RetryPolicy, ExecutionState
+│   │   ├── events.py           # RuntimeEventType, EventSequenceTracker, EventFactory
+│   │   ├── state.py            # TaskLifecycleDFA (deterministic task state machine)
+│   │   ├── idempotency.py      # IdempotencyRegistry & stable task identity hashing
+│   │   ├── queue.py            # DurableTaskQueue (priority scheduling, leases, atomic persistence)
+│   │   ├── dispatcher.py       # SpecialistDispatcher (domain-neutral contract-based routing)
+│   │   ├── executor.py         # RuntimeExecutor (governed execution pipeline)
+│   │   ├── scheduler.py        # RuntimeScheduler (case serialization locks, pause/resume gating)
+│   │   ├── recovery.py         # RuntimeRecoveryManager (crash reconciliation across claim & execution stages)
+│   │   ├── persistence.py      # RuntimePersistenceManager (atomic state serialization)
+│   │   └── errors.py           # Explicit failure taxonomy & exception hierarchy
 │   ├── validation/             # Multi-phase Validation Pipeline
 │   │   ├── errors.py           # Schema, Policy, State, and Result validation errors
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 226 unit & integration tests covering all requirements
+├── tests/                      # 261 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -453,7 +465,55 @@ Execution Decision & Journal Audit Trail
 
 ---
 
-## 13. Running the Tests
+## 13. Durable Event-Driven Investigation Runtime v0.1
+
+CyberClaw's investigation workflows execute as resumable, observable, event-driven state transitions rather than relying primarily on synchronous orchestration loops.
+
+### Runtime Axioms
+1. **`EVENT ≠ EXECUTION`**: An event signifies that something occurred or is requested; it never grants permission or implies execution.
+2. **`QUEUED ≠ AUTHORIZED`**: Putting work in a durable queue does not mean the work is approved.
+3. **`AUTHORIZED ≠ EXECUTED`**: Policy and validation approval does not imply specialist or provider execution took place.
+4. **`EXECUTED ≠ SUCCEEDED`**: A specialist returning an outcome does not mean it produced valid evidence or succeeded.
+5. **`RETRY ≠ RE-EXECUTE UNSAFELY`**: Retries must re-enter the validation and authorization pipeline; destructive actions are strictly barred from automatic retry.
+6. **`REPLAY ≠ RE-RUN`**: Time-travel replay reads historical facts to reconstruct state; it never creates tasks, invokes providers, or requests authorization.
+7. **`DURABILITY ≠ PERMISSION`**: Persisting a task or queue state does not elevate trust or bypass security checks.
+8. **`CONCURRENCY ≠ AUTHORITY`**: Parallel workers cannot race past serialization locks or mutate authoritative case sequences out-of-order.
+
+> *"AN EVENT REQUESTS WORK. THE RUNTIME VALIDATES THE WORK. THE DFA AUTHORIZES THE TRANSITION. POLICY AUTHORIZES THE ACTION. A SPECIALIST PERFORMS THE WORK. THE RESULT BECOMES AN EVENT. THE CASE RECORD MAKES IT DURABLE."*
+
+### Key Subsystems & Guarantees
+* **Deterministic Task Lifecycle DFA (`TaskLifecycleDFA`)**:
+  * Enforces state progression: `CREATED -> QUEUED -> VALIDATING -> AUTHORIZED -> DISPATCHED -> RUNNING -> COMPLETED`.
+  * Governed alternate branches: `DEFERRED`, `REJECTED`, `CANCELLED`, `FAILED`, `TIMED_OUT`, `RETRY_PENDING`.
+  * Arbitrary or backward state jumps are strictly rejected with `StateTransitionError`.
+* **Durable Priority Task Queue (`DurableTaskQueue`)**:
+  * Monotonically ordered multi-priority dequeue (`CRITICAL > HIGH > NORMAL > LOW`).
+  * Time-bounded worker leases with automatic lease expiration and reclaim.
+  * Thread-safe double-claim protection.
+  * Atomic persistence to workspace layout (`runtime/queue.json`).
+* **Idempotency & Duplicate Protection (`IdempotencyRegistry`)**:
+  * Stable deterministic hashing of investigation ID, capability identity, version, requirement ID, and canonical parameters.
+  * Separates event deduplication from authorization deduplication and execution deduplication.
+  * Completed executions reconcile directly without re-invoking providers.
+* **Governed Execution Pipeline (`RuntimeExecutor`)**:
+  * Verifies capability lifecycle state (`AVAILABLE`, `TRUSTED`) and trust state (`TRUSTED_WITH_SCOPE`, `FULLY_TRUSTED`).
+  * Evaluates contextual policy rules via `PolicyEngine` (`DENY`, `REQUIRE_APPROVAL`, `REQUIRE_SUPERVISION`, `DEFER`, `ALLOW`).
+  * Validates request through `ValidationPipeline` (schema, permissions, case DFA state).
+  * Dispatches to specialist endpoint or capability provider without domain-specific conditionals (`if osint`, `if network`).
+  * Enforces strict result schema validation, ingests evidence, logs case journal entries, and registers lessons into `ExperienceStore`.
+* **Process-Restart Crash Recovery (`RuntimeRecoveryManager`)**:
+  * Unstarted claimed tasks return to `QUEUED` (`requeued_unstarted`).
+  * Finished tasks unacknowledged before crash are reconciled via idempotency records and acknowledged (`reconciled_completed`).
+  * Interrupted consequential tasks are flagged `UNKNOWN_EXECUTION_STATE` to prevent dangerous duplicate executions (`flagged_unknown`).
+  * Interrupted reversible tasks are safely retried according to policy (`retried_reversible`).
+* **Case-Level Serialization & Flow Control (`RuntimeScheduler`)**:
+  * Investigation-level locks prevent concurrent state mutation race conditions.
+  * Explicit investigation pause/resume controls halt queue processing during human triage or maintenance (`PauseViolationError`).
+  * Counterfactual branches strictly block real provider execution (`BranchExecutionBlockedError`).
+
+---
+
+## 14. Running the Tests
 
 Install dependencies and run the test suite:
 

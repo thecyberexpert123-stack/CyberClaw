@@ -127,6 +127,10 @@ class PermissionManager:
         """Grant a specific granular permission to an actor."""
         self._actor_permissions.setdefault(actor, set()).add(permission)
 
+    def get_roles(self, actor: str) -> Set[str]:
+        """Return the set of assigned role names for an actor."""
+        return self._actor_roles.get(actor, set()).copy()
+
     def get_effective_permissions(self, actor: str) -> Set[str]:
         """Compute the union of directly granted and role-based permissions for an actor."""
         perms = set(self._actor_permissions.get(actor, set()))

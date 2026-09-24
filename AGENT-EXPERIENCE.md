@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Durable Event-Driven Investigation Runtime v0.1
+
+### Lesson 15: Ontological Separation of Event, Queue, Authorization, and Execution
+- **Observation**: Systems frequently treat event ingestion, work queueing, policy authorization, and specialist execution as a single blurred lifecycle step.
+- **Consequence**: Tasks pulled from a queue bypass security checks under the assumption that "if it's in the queue, it's authorized", or duplicate delivery results in dangerous duplicate side-effects.
+- **Resolution**: Enforced strict runtime axioms: `EVENT ≠ EXECUTION`, `QUEUED ≠ AUTHORIZED`, `AUTHORIZED ≠ EXECUTED`, and `EXECUTED ≠ SUCCEEDED`. Enqueuing a task merely registers intent; the claimed task must pass formal capability trust verification, PolicyEngine evaluation, and multi-phase schema/permission validation before dispatch. Duplicate events, duplicate authorizations, and duplicate executions are segregated into distinct idempotency registries.
+
+### Lesson 16: Crash Recovery Reconciles Rather Than Blindly Re-Executing
+- **Observation**: When worker processes crash mid-investigation, naive queue recovery simply resets all in-flight tasks to `QUEUED` and re-runs them upon restart.
+- **Consequence**: Consequential or destructive actions (such as credential revocation, network isolation, or API writes) get executed multiple times, while completed executions whose acknowledgments were lost re-execute needlessly.
+- **Resolution**: Implemented `RuntimeRecoveryManager` with stage-aware reconciliation. Unstarted claimed tasks return safely to `QUEUED`. Executions already completed in the idempotency store are acknowledged immediately without provider dispatch. Interrupted consequential operations without confirmed results are flagged `UNKNOWN_EXECUTION_STATE` to prevent dangerous duplicate executions and require human/operator intervention.
+
+### Lesson 17: Case-Level Mutation Serialization Under Asynchronous Work Queues
+- **Observation**: While work queues support multi-worker concurrent dequeuing across different investigations, executing multiple tasks concurrently on the same investigation leads to journal sequence interleaving, out-of-order state transitions, and broken cryptographic replay seals.
+- **Consequence**: Time-travel replay validator rejects the investigation history because events or DFA transitions appear out of sequence.
+- **Resolution**: `RuntimeScheduler` maintains per-investigation serialization locks. Workers can process different investigations concurrently with high throughput, but all mutations within a single investigation case record are strictly serialized, preserving monotonic event sequences, consistent DFA state progressions, and deterministic replay digests.
+
 ## Milestone: Policy Engine & Risk-Aware Authorization v0.1
 
 ### Lesson 12: Contextual Authorization Independent of Static Trust

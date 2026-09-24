@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Durable Event-Driven Investigation Runtime v0.1
+- **`cyberclaw/runtime/models.py`**: Immutable, versioned data models including `RuntimeEvent`, `RuntimeTask`, `TaskStatus`, `TaskPriority`, `CancellationStatus`, `ExecutionState`, `RetryPolicy`, `RuntimeMetrics`, and `RuntimeObservabilityReport`.
+- **`cyberclaw/runtime/events.py`**: Explicit event typing (`RuntimeEventType` with 23 operational lifecycle event types), monotonic per-investigation `EventSequenceTracker` rejecting regressions and duplicates, and `EventFactory` maintaining causation and correlation graphs.
+- **`cyberclaw/runtime/state.py`**: Deterministic `TaskLifecycleDFA` defining formal task transition rules (`CREATED -> QUEUED -> VALIDATING -> AUTHORIZED -> DISPATCHED -> RUNNING -> COMPLETED`) and governed alternate paths (`DEFERRED`, `REJECTED`, `CANCELLED`, `FAILED`, `TIMED_OUT`, `RETRY_PENDING`).
+- **`cyberclaw/runtime/idempotency.py`**: Deterministic `compute_task_idempotency_key` and thread-safe `IdempotencyRegistry` maintaining strict ontological separation: duplicate event ≠ duplicate authorization ≠ duplicate execution.
+- **`cyberclaw/runtime/queue.py`**: `DurableTaskQueue` providing multi-priority dequeuing (`CRITICAL > HIGH > NORMAL > LOW`), time-bounded worker leases, automatic lease expiration and reclaim, thread-safe double-claim protection, retry scheduling, task cancellation, and atomic workspace persistence.
+- **`cyberclaw/runtime/dispatcher.py`**: Contract-based `SpecialistDispatcher` resolving capability requests to specialist endpoints or registered providers without domain-specific conditionals.
+- **`cyberclaw/runtime/executor.py`**: Governed `RuntimeExecutor` orchestrating the end-to-end execution pipeline: branch check, idempotency check, timeout evaluation, capability trust & lifecycle verification, contextual policy authorization, multi-phase validation pipeline (schema, permissions, DFA), specialist dispatch, result validation, structured evidence ingestion, case journal logging, and experience store recording.
+- **`cyberclaw/runtime/scheduler.py`**: `RuntimeScheduler` enforcing case-level serialization locks, priority dispatching, monotonic sequence assignment, pause/resume gating, and worker metrics tracking.
+- **`cyberclaw/runtime/recovery.py`**: `RuntimeRecoveryManager` performing deterministic crash recovery across worker claim, execution, and unacknowledged stages without blind retries or destructive double-executions.
+- **`cyberclaw/runtime/persistence.py`**: `RuntimePersistenceManager` implementing atomic state export and import to `runtime/queue.json` and `runtime/idempotency.json`.
+- **`cyberclaw/runtime/errors.py`**: Structured failure taxonomy and exception hierarchy (`QueueError`, `RuntimeValidationError`, `RuntimeAuthorizationError`, `DispatchError`, `ProviderExecutionError`, `RuntimeTimeoutError`, `RuntimeResultValidationError`, `EvidenceProcessingError`, `StateTransitionError`, `PersistenceError`, `RecoveryError`, `DuplicateEventError`, `PauseViolationError`, `BranchExecutionBlockedError`, `ConcurrencyConflictError`, `UnknownExecutionStateError`).
+- **Core Integration**:
+  - `CyberClawCore.submit_task_to_runtime(...)`: Submits executable tasks with priority, scope, actor, and timeout into the durable queue.
+  - `CyberClawCore.submit_requirement_to_runtime(...)`: Bridges planning `InformationRequirement` into durable runtime tasks.
+  - `CyberClawCore.step_runtime(...)` & `process_runtime_queue(...)`: Step-by-step and batch queue execution with case persistence.
+  - `CyberClawCore.pause_investigation_runtime(...)` & `resume_investigation_runtime(...)`: Controlled runtime pause/resume flow control.
+  - `CyberClawCore.recover_runtime(...)`: Process-restart recovery reconciliation.
+- **Case Journal**:
+  - Added `TASK_QUEUED`, `TASK_CLAIMED`, `TASK_COMPLETED` to `JournalEntryType`.
+- **Comprehensive Test Suite**:
+  - Added 35 unit and integration tests across 6 new test files:
+    - `tests/test_runtime_events_and_models.py`
+    - `tests/test_runtime_lifecycle_and_queue.py`
+    - `tests/test_runtime_idempotency_and_concurrency.py`
+    - `tests/test_runtime_retry_timeout_recovery.py`
+    - `tests/test_runtime_governance_and_integration.py` (including full 34-step Section 37 E2E scenario)
+    - `tests/test_runtime_errors_and_observability.py`
+  - Total passing tests increased from 226 to 261.
+
 ### Added - Policy Engine & Risk-Aware Authorization v0.1
 - **`cyberclaw/policy/models.py`**: Domain-agnostic models including `Policy`, `PolicyRule`, `PolicyEffect`, `PolicyExecutionContext`, `AuthorizationDecision`, `AuthorizationDecisionType`, `RiskLevel`, `RiskAssessment`, `RiskFactor`, `ActorRole`, and `PolicyValidationRecord`.
 - **`cyberclaw/policy/errors.py`**: Structured error hierarchy (`PolicyError`, `PolicyNotFoundError`, `PolicyValidationError`, `AuthorizationDeniedError`, `ApprovalRequiredError`, `SupervisionRequiredError`, `PolicyConflictError`, `InvalidPolicyContextError`).

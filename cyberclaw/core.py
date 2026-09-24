@@ -103,6 +103,24 @@ class CyberClawCore:
         # Initialize Policy Engine
         self.policy_engine = PolicyEngine()
 
+        # Initialize Durable Event-Driven Runtime
+        from cyberclaw.runtime.queue import DurableTaskQueue
+        from cyberclaw.runtime.idempotency import IdempotencyRegistry
+        from cyberclaw.runtime.dispatcher import SpecialistDispatcher
+        from cyberclaw.runtime.executor import RuntimeExecutor
+        from cyberclaw.runtime.scheduler import RuntimeScheduler
+        self.runtime_queue = DurableTaskQueue()
+        self.runtime_idempotency = IdempotencyRegistry()
+        self.runtime_dispatcher = SpecialistDispatcher(self.specialists, self.capabilities)
+        self.runtime_executor = RuntimeExecutor(
+            capabilities=self.capabilities,
+            policy_engine=self.policy_engine,
+            dispatcher=self.runtime_dispatcher,
+            queue=self.runtime_queue,
+            idempotency_registry=self.runtime_idempotency,
+        )
+        self.runtime_scheduler = RuntimeScheduler(self.runtime_queue, self.runtime_executor)
+
     def _resolve_actor_role(self, actor: str) -> str:
         """Resolve an actor identifier to a recognized ActorRole value."""
         if actor == "core.system" or actor.startswith("system."):
@@ -1277,6 +1295,217 @@ class CyberClawCore:
         from cyberclaw.capabilities.governance import CapabilityGovernance
         all_caps = self.capabilities.list_capabilities(include_retired=True, include_disabled=True)
         return CapabilityGovernance.discover_capabilities_for_gap(gap, all_caps)
+
+    # --------------------------------------------------------------------------
+    # Durable Event-Driven Runtime APIs
+    # --------------------------------------------------------------------------
+
+    def submit_task_to_runtime(
+        self,
+        investigation_id: str,
+        capability_id: str,
+        parameters: Dict[str, Any],
+        requirement_id: Optional[str] = None,
+        priority: Any = None,
+        scope: Optional[ActionScope] = None,
+        actor: str = "core.system",
+        actor_role: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+        is_counterfactual: bool = False,
+    ):
+        """Submit an executable task into the durable runtime queue."""
+        from cyberclaw.runtime.models import RuntimeTask, TaskPriority
+        from cyberclaw.runtime.idempotency import compute_task_idempotency_key
+
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        cap = self.capabilities.get_capability(capability_id)
+        cap_version = cap.version if cap else "1.0.0"
+        task_scope = scope if scope is not None else (cap.action_scope if cap else ActionScope.REVERSIBLE)
+
+        idemp_key = compute_task_idempotency_key(
+            investigation_id=investigation_id,
+            capability_id=capability_id,
+            capability_version=cap_version,
+            requirement_id=requirement_id,
+            parameters=parameters,
+        )
+
+        task_priority = priority or TaskPriority.NORMAL
+        effective_role = actor_role or self._resolve_actor_role(actor)
+
+        task = RuntimeTask(
+            investigation_id=investigation_id,
+            requirement_id=requirement_id,
+            capability_id=capability_id,
+            capability_version=cap_version,
+            action_scope=task_scope.value if isinstance(task_scope, ActionScope) else str(task_scope),
+            parameters=parameters,
+            actor=actor,
+            actor_role=effective_role,
+            priority=task_priority,
+            idempotency_key=idemp_key,
+            timeout_seconds=timeout_seconds,
+            is_counterfactual=is_counterfactual or getattr(inv, "is_branch", False),
+        )
+
+        enqueued = self.runtime_queue.enqueue(task)
+
+        # Journal the queued event
+        inv.case_manager.journal.append_entry(
+            entry_type=JournalEntryType.TASK_QUEUED,
+            summary=f"Runtime task '{task.task_id}' queued for capability '{capability_id}' (priority {int(task_priority)})",
+            reference_id=task.task_id,
+            details={
+                "capability_id": capability_id,
+                "requirement_id": requirement_id,
+                "idempotency_key": idemp_key,
+                "priority": int(task_priority),
+            },
+        )
+        return enqueued
+
+    def submit_requirement_to_runtime(
+        self,
+        investigation_id: str,
+        requirement_id: str,
+        priority: Any = None,
+        actor: str = "core.system",
+    ):
+        """Convert an existing InformationRequirement into a durable runtime task."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        req = inv.information_requirements.get(requirement_id)
+        if not req:
+            raise KeyError(f"Requirement '{requirement_id}' not found in investigation '{investigation_id}'.")
+
+        capability_id = req.assigned_capability_id
+        if not capability_id:
+            candidates = self.specialists.find_by_capability(req.target_or_entity)
+            if candidates:
+                capability_id = req.target_or_entity
+            else:
+                capability_id = "general.discovery"
+
+        params = {"target": req.target_or_entity, "sought_types": req.evidence_types_sought}
+
+        return self.submit_task_to_runtime(
+            investigation_id=investigation_id,
+            capability_id=capability_id,
+            parameters=params,
+            requirement_id=requirement_id,
+            priority=priority,
+            actor=actor,
+        )
+
+    def process_runtime_queue(
+        self,
+        investigation_id: str,
+        max_steps: int = 50,
+        actor: str = "core.system",
+        custom_lesson: Optional[str] = None,
+    ):
+        """Process queued tasks for an investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        processed = self.runtime_scheduler.process_all(
+            investigation=inv,
+            permission_manager=self.permissions,
+            max_steps=max_steps,
+            custom_lesson=custom_lesson,
+            experience_store=self.experiences,
+        )
+
+        self._persist_case(inv)
+        self.persist_runtime_state(investigation_id)
+        return processed
+
+    def step_runtime(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+        custom_lesson: Optional[str] = None,
+    ):
+        """Execute a single step from the runtime queue."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        task = self.runtime_scheduler.step(
+            investigation=inv,
+            permission_manager=self.permissions,
+            custom_lesson=custom_lesson,
+            experience_store=self.experiences,
+        )
+        if task:
+            self._persist_case(inv)
+            self.persist_runtime_state(investigation_id)
+        return task
+
+    def pause_investigation_runtime(
+        self,
+        investigation_id: str,
+        reason: str = "",
+        actor: str = "core.system",
+    ) -> None:
+        """Pause runtime execution for an investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        self.runtime_scheduler.pause_investigation(investigation_id, reason=reason)
+        inv.case_manager.journal.append_entry(
+            entry_type=JournalEntryType.DECISION_RECORDED,
+            summary=f"Investigation runtime PAUSED: {reason or 'Manual operator pause'}",
+            reference_id=investigation_id,
+            details={"decision": "PAUSE_RUNTIME", "reason": reason, "actor": actor},
+        )
+
+    def resume_investigation_runtime(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ) -> None:
+        """Resume runtime execution for a paused investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        self.runtime_scheduler.resume_investigation(investigation_id)
+        inv.case_manager.journal.append_entry(
+            entry_type=JournalEntryType.DECISION_RECORDED,
+            summary="Investigation runtime RESUMED",
+            reference_id=investigation_id,
+            details={"decision": "RESUME_RUNTIME", "actor": actor},
+        )
+
+    def recover_runtime(self):
+        """Recover runtime from process restart or crash."""
+        from cyberclaw.runtime.recovery import RuntimeRecoveryManager
+        return RuntimeRecoveryManager.recover(self.runtime_queue, self.runtime_idempotency)
+
+    def persist_runtime_state(self, investigation_id: Optional[str] = None) -> None:
+        """Atomically persist runtime queue and idempotency records."""
+        from cyberclaw.runtime.persistence import RuntimePersistenceManager
+        base_dir = self.workspace.base_path
+        if investigation_id:
+            layout = self.workspace.get_investigation_workspace(investigation_id)
+            base_dir = layout.root
+        RuntimePersistenceManager.persist_state(self.runtime_queue, self.runtime_idempotency, base_dir)
+
+    def load_runtime_state(self, investigation_id: Optional[str] = None) -> bool:
+        """Load persisted runtime queue and idempotency records."""
+        from cyberclaw.runtime.persistence import RuntimePersistenceManager
+        base_dir = self.workspace.base_path
+        if investigation_id:
+            layout = self.workspace.get_investigation_workspace(investigation_id)
+            base_dir = layout.root
+        return RuntimePersistenceManager.load_state(self.runtime_queue, self.runtime_idempotency, base_dir)
+
 
 
 
