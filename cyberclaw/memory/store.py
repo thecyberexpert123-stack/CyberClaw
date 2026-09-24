@@ -45,6 +45,11 @@ class ExperienceStore:
         self._records[record.id] = record
         return record
 
+    def add_record(self, record: ExperienceRecord) -> ExperienceRecord:
+        """Directly add an existing structured ExperienceRecord."""
+        self._records[record.id] = record
+        return record
+
     def get(self, experience_id: str) -> Optional[ExperienceRecord]:
         """Retrieve an experience record by ID."""
         return self._records.get(experience_id)

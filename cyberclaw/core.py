@@ -199,12 +199,14 @@ class CyberClawCore:
         return inv
 
     def _persist_case(self, inv: Investigation) -> None:
-        """Persist investigation state, evidence, snapshots, journal, and decisions."""
+        """Persist investigation state, evidence, snapshots, journal, decisions, and branches."""
         self.workspace.persist_state(inv.id, inv.to_dict())
         self.workspace.persist_evidence(inv.id, inv.evidence_store.list_all())
         self.workspace.persist_snapshots(inv.id, inv.case_manager.snapshots.snapshots)
         self.workspace.persist_journal(inv.id, inv.case_manager.journal.entries)
         self.workspace.persist_decisions(inv.id, inv.case_manager.journal.decisions)
+        if inv.branches:
+            self.workspace.persist_branches(inv.id, list(inv.branches.values()))
 
     def get_investigation(
         self,
@@ -899,6 +901,134 @@ class CyberClawCore:
             inv.case_manager.journal.decisions,
         )
         return True
+
+    # --------------------------------------------------------------------------
+    # Investigation Branching & Counterfactual Analysis
+    # --------------------------------------------------------------------------
+
+    def create_investigation_branch(
+        self,
+        investigation_id: str,
+        source_snapshot: Union[int, str],
+        purpose: str,
+        originating_decision_id: Optional[str] = None,
+        parent_branch_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        actor: str = "core.system",
+    ):
+        """Create an isolated investigation branch rooted at a cryptographically verified snapshot."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        branch = inv.create_branch(
+            source_snapshot=source_snapshot,
+            purpose=purpose,
+            originating_decision_id=originating_decision_id,
+            parent_branch_id=parent_branch_id,
+            metadata=metadata,
+        )
+        self._persist_case(inv)
+        return branch
+
+    def get_investigation_branch(
+        self,
+        investigation_id: str,
+        branch_id: str,
+        actor: str = "core.system",
+    ):
+        """Retrieve a specific investigation branch by ID."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.get_branch(branch_id)
+
+    def list_investigation_branches(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ):
+        """List all derived branches for an investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.list_branches()
+
+    def replay_investigation_branch(
+        self,
+        investigation_id: str,
+        branch_id: str,
+        until_local_sequence: Optional[int] = None,
+        actor: str = "core.system",
+    ):
+        """Deterministically reconstruct historical state of a branch up to a local sequence index."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.replay_branch(branch_id, until_local_sequence=until_local_sequence)
+
+    def compare_investigation_branches(
+        self,
+        investigation_id: str,
+        branch_a_id: str,
+        branch_b_id: str,
+        actor: str = "core.system",
+    ):
+        """Factually compare two investigation branches without scoring or ranking."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.compare_branches(branch_a_id, branch_b_id)
+
+    def compare_branch_to_snapshot(
+        self,
+        investigation_id: str,
+        branch_id: str,
+        snapshot_seq_or_id: Union[int, str],
+        actor: str = "core.system",
+    ):
+        """Factually compare a branch derived state against an authoritative snapshot."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return inv.compare_branch_with_snapshot(branch_id, snapshot_seq_or_id)
+
+    def promote_investigation_branch(
+        self,
+        investigation_id: str,
+        branch_id: str,
+        reason: str,
+        actor: str = "core.system",
+    ):
+        """Promote a branch for authoritative consideration (does not mutate facts directly)."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        decision = inv.promote_branch(branch_id, reason=reason, actor=actor)
+        self._persist_case(inv)
+        return decision
+
+    def validate_branch_history(
+        self,
+        investigation_id: str,
+        branch_id: str,
+        actor: str = "core.system",
+    ) -> bool:
+        """Validate structural and cryptographic integrity of a branch."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        branch = inv.get_branch(branch_id)
+        if not branch:
+            from cyberclaw.branching.errors import BranchNotFoundError
+            raise BranchNotFoundError(f"Branch '{branch_id}' not found.")
+        from cyberclaw.branching.validator import BranchValidator
+        BranchValidator.validate_all(
+            branch=branch,
+            snapshots=inv.case_manager.snapshots.snapshots,
+            authoritative_evidence_ids={e.id for e in inv.evidence_store.list_all()},
+        )
+        return True
+
 
 
 

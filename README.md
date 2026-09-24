@@ -317,7 +317,39 @@ The Investigation Replay and Deterministic Time-Travel subsystem enables CyberCl
 
 ---
 
-## 10. Running the Tests
+## 10. Investigation Branching & Counterfactual Analysis v0.1
+
+The Investigation Branching and Counterfactual Analysis subsystem allows CyberClaw to explore alternative investigative paths, simulate requirement outcomes, and perform comparative "what-if" analyses **without altering authoritative case history**:
+
+> **CORE PRINCIPLE: COUNTERFACTUAL RESULTS ARE NOT HISTORICAL FACTS.**
+> The authoritative case records what actually happened. A branch represents a derived investigative context. A counterfactual is an analytical exploration, not fact. No branch may silently become reality.
+
+* **Authoritative vs. Derived State**:
+  * **Authoritative History**: Strictly immutable. Authoritative snapshots, case journals, decision records, empirical evidence, requirements, hypotheses, and global `ExperienceStore` cannot be rewritten or modified by branch exploration.
+  * **InvestigationBranch (`cyberclaw/branching/models.py`)**: An isolated derived context originating from a cryptographically sealed historical snapshot (`source_snapshot_sequence`). Contains branch-local private journals (`BranchJournalEntry`), simulated evidence, hypotheses, and requirements.
+* **Branch Lineage**:
+  * Rooted at a verified snapshot checkpoint (`source_snapshot_id`). Supports child/nested branch lineages (`parent_branch_id`).
+* **Counterfactual Semantics & No Unauthorized Execution**:
+  * Exploration operates purely over data structures, historical records, and deterministic simulation.
+  * Security boundary: Branches **never execute real tools, network operations, shell commands, or external APIs**. Actions are evaluated as hypothetical state shifts.
+* **Deterministic Branch Replay**:
+  * Branch histories can be replayed from the source snapshot through branch journal events up to local sequence $N$.
+  * Determinism guarantee: Repeated replay of a branch yields an identical `ReconstructedState` with matching cryptographic digest.
+* **Factual, Unranked Branch Comparison (`BranchComparison`)**:
+  * `compare_branches(branch_a, branch_b)` computes precise set differences: evidence gained/lost, entities discovered, relationships mapped, hypothesis shifts, contradictions resolved, requirements satisfied, and capability gaps.
+  * Zero subjective scoring or ranking: branches are presented with factual differences without declaring a universal "winner".
+* **Promotion Boundary (Explicit Promotion vs Merging)**:
+  * Unrestricted automatic branch merging is prohibited.
+  * A branch can be marked `PROMOTED` via explicit validation, recording an authoritative `DecisionRecord` (e.g. `PLANNING_SELECTION`) for human or executive consideration, without directly mutating authoritative case evidence or DFA state.
+* **Experience & Self-Development Boundaries**:
+  * Branch observations are quarantined as `CandidateBranchExperience` (`is_counterfactual=True`).
+  * Branch experiences can never enter the global `ExperienceStore` or trigger autonomous self-development/capability promotion without explicit audit and validation.
+* **Workspace Persistence**:
+  * Persisted safely in workspace subdirectories: `branches/branch_<id>/{metadata.json, journal.json, state.json, decisions.json}` with atomic writes and a global `branches/branches_index.json`.
+
+---
+
+## 11. Running the Tests
 
 Install dependencies and run the test suite:
 

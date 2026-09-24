@@ -48,6 +48,12 @@ class Investigation(BaseModel):
     updated_at: datetime = Field(default_factory=utc_now)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     _case_manager: Optional[Any] = PrivateAttr(default=None)
+    _branches: Dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    @property
+    def branches(self) -> Dict[str, Any]:
+        """Dictionary of derived branches indexed by branch_id."""
+        return self._branches
 
     @property
     def case_manager(self) -> Any:
@@ -247,6 +253,81 @@ class Investigation(BaseModel):
         """Assemble the complete CaseState object adhering to the conceptual model."""
         return self.case_manager.assemble_case_state(self)
 
+    # --------------------------------------------------------------------------
+    # Investigation Branching & Counterfactual Analysis
+    # --------------------------------------------------------------------------
+
+    def create_branch(
+        self,
+        source_snapshot: Union[int, str],
+        purpose: str,
+        originating_decision_id: Optional[str] = None,
+        parent_branch_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Create an isolated investigation branch rooted at a cryptographically verified snapshot."""
+        from cyberclaw.branching.engine import BranchEngine
+        branch = BranchEngine.create_branch(
+            investigation=self,
+            source_snapshot=source_snapshot,
+            purpose=purpose,
+            originating_decision_id=originating_decision_id,
+            parent_branch_id=parent_branch_id,
+            metadata=metadata,
+        )
+        self._branches[branch.branch_id] = branch
+        return branch
+
+    def get_branch(self, branch_id: str):
+        """Retrieve a branch by ID."""
+        return self._branches.get(branch_id)
+
+    def list_branches(self):
+        """List all branches created under this investigation."""
+        return list(self._branches.values())
+
+    def replay_branch(self, branch_id: str, until_local_sequence: Optional[int] = None):
+        """Deterministically reconstruct historical state of a branch."""
+        from cyberclaw.branching.engine import BranchEngine
+        from cyberclaw.branching.errors import BranchNotFoundError
+        branch = self.get_branch(branch_id)
+        if not branch:
+            raise BranchNotFoundError(f"Branch '{branch_id}' not found in investigation '{self.id}'.")
+        return BranchEngine.replay_branch(branch, self, until_local_sequence=until_local_sequence)
+
+    def compare_branches(self, branch_a_id: str, branch_b_id: str):
+        """Factually compare two investigation branches."""
+        from cyberclaw.branching.engine import BranchEngine
+        from cyberclaw.branching.errors import BranchNotFoundError
+        ba = self.get_branch(branch_a_id)
+        bb = self.get_branch(branch_b_id)
+        if not ba:
+            raise BranchNotFoundError(f"Branch '{branch_a_id}' not found.")
+        if not bb:
+            raise BranchNotFoundError(f"Branch '{branch_b_id}' not found.")
+        return BranchEngine.compare_branches(ba, bb)
+
+    def compare_branch_with_snapshot(self, branch_id: str, snapshot_seq_or_id: Union[int, str]):
+        """Factually compare a branch with an authoritative snapshot."""
+        from cyberclaw.branching.engine import BranchEngine
+        from cyberclaw.branching.errors import BranchNotFoundError
+        branch = self.get_branch(branch_id)
+        if not branch:
+            raise BranchNotFoundError(f"Branch '{branch_id}' not found.")
+        snap = self.get_snapshot(snapshot_seq_or_id)
+        if not snap:
+            raise KeyError(f"Snapshot '{snapshot_seq_or_id}' not found.")
+        return BranchEngine.compare_branch_with_snapshot(branch, snap)
+
+    def promote_branch(self, branch_id: str, reason: str, actor: str = "core.system"):
+        """Promote a branch for authoritative consideration without mutating facts."""
+        from cyberclaw.branching.engine import BranchEngine
+        from cyberclaw.branching.errors import BranchNotFoundError
+        branch = self.get_branch(branch_id)
+        if not branch:
+            raise BranchNotFoundError(f"Branch '{branch_id}' not found.")
+        return BranchEngine.promote_branch(branch, self, reason=reason, actor=actor)
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize metadata and state to dictionary for persistence."""
         return {
@@ -269,4 +350,5 @@ class Investigation(BaseModel):
             "snapshots_count": len(self.case_manager.snapshots.snapshots),
             "decisions_count": len(self.case_manager.journal.decisions),
             "journal_count": len(self.case_manager.journal.entries),
+            "branches_count": len(self._branches),
         }
