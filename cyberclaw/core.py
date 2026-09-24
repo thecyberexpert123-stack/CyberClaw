@@ -66,6 +66,17 @@ class CyberClawCore:
             correlation_engine=self.correlation,
         )
 
+        # Initialize Adaptive Planning Engine
+        from cyberclaw.planning.engine import AdaptivePlanningEngine
+        from cyberclaw.planning.planner import DeterministicPlanner
+        from cyberclaw.planning.validator import PlanValidator
+        self.planner = DeterministicPlanner()
+        self.plan_validator = PlanValidator()
+        self.planning_engine = AdaptivePlanningEngine(
+            planner=self.planner,
+            validator=self.plan_validator,
+        )
+
     @property
     def is_running(self) -> bool:
         """True if the Core system is active."""
@@ -114,6 +125,7 @@ class CyberClawCore:
         self,
         title: str,
         description: str = "",
+        targets: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         actor: str = "core.system",
     ) -> Investigation:
@@ -129,6 +141,7 @@ class CyberClawCore:
         inv = Investigation(
             title=title,
             description=description,
+            targets=targets or [],
             metadata=metadata or {},
         )
         # Establish initial DFA state transition INITIALIZE -> READY
@@ -578,3 +591,56 @@ class CyberClawCore:
         res = self.coordinator.evaluate_hypotheses(inv)
         self.workspace.persist_state(investigation_id, inv.to_dict())
         return res
+
+    # --------------------------------------------------------------------------
+    # Adaptive Investigation Planning
+    # --------------------------------------------------------------------------
+
+    def plan_investigation(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+        max_candidates: int = 5,
+        auto_convert_candidates: bool = False,
+    ):
+        """Generate and validate a structured InvestigationPlan."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        plan, val_res = self.planning_engine.plan_cycle(
+            investigation=inv,
+            specialists=self.specialists,
+            capabilities=self.capabilities,
+            permissions=self.permissions,
+            actor=actor,
+            max_candidates=max_candidates,
+            auto_convert_candidates=auto_convert_candidates,
+        )
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return plan, val_res
+
+    def run_adaptive_investigation(
+        self,
+        investigation_id: str,
+        max_cycles: int = 3,
+        actor: str = "core.system",
+    ):
+        """Execute the full adaptive planning and investigation loop until stopping condition."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        plans = self.planning_engine.run_adaptive_loop(
+            investigation=inv,
+            specialists=self.specialists,
+            capabilities=self.capabilities,
+            permissions=self.permissions,
+            coordinator=self.coordinator,
+            max_cycles=max_cycles,
+            actor=actor,
+        )
+        self.workspace.persist_evidence(investigation_id, inv.evidence_store.list_all())
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return plans
+

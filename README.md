@@ -204,7 +204,39 @@ The Global Coordination and Evidence Correlation layer enables multiple autonomo
 
 ---
 
-## 7. Running the Tests
+## 7. Adaptive Investigation Planning v0.1
+
+The Adaptive Investigation Planning subsystem enables CyberClaw to autonomously reason about *"What information should be sought next?"* via deterministic, auditable planning cycles without becoming an uncontrolled agent:
+
+* **Separation of Architectural Roles**:
+  * **Planner**: *"What information might be useful next?"* (Proposes structured `InvestigationPlan` containing `RequirementCandidate`s).
+  * **Coordinator / Validator**: *"Is that request valid and authorized?"* (Validates candidates structurally, against capabilities, and permissions).
+  * **Router**: *"Which Specialist can satisfy it?"* (Matches requirement to eligible specialists).
+  * **Specialist**: *"How do I accomplish it?"* (Executes workflows, coordinates providers).
+  * **Provider**: *"How do I technically execute this capability?"* (Executes low-level tool/API calls).
+* **The Planning Loop**:
+  ```text
+  Evidence ──→ Correlation ──→ State ──→ Uncertainty/Gaps ──→ Planning ──→ Validation ──→ Execution ──→ Replanning
+  ```
+* **Structured Uncertainty & Value Models**:
+  * **`UncertaintyType`**: `UNKNOWN`, `AMBIGUOUS`, `UNCONFIRMED`, `CONTRADICTED`, `INCOMPLETE`, `STALE`.
+  * **`InformationValueDimension`**: `HYPOTHESIS_SUPPORT`, `HYPOTHESIS_DISCONFIRMATION`, `CONTRADICTION_RESOLUTION`, `ENTITY_ENRICHMENT`, `MISSING_EVIDENCE`, `CORROBORATION`.
+  * **Balanced Hypothesis Testing**: Proposes both confirming *and* disconfirming candidates to prevent confirmation bias.
+* **Deterministic Planning Rules (`PlanningRule`)**:
+  * **`EntityEnrichmentPlanningRule`**: Proposes network and context enrichment for newly discovered IPs and domains.
+  * **`ContradictionResolutionPlanningRule`**: Proposes targeted verification (e.g., authoritative registry lookups) to adjudicate contradictory observations.
+  * **`HypothesisTestingPlanningRule`**: Formulates balanced verification needs for open investigative hypotheses.
+  * **Deduplication & Failure Awareness**: Prevents re-planning already satisfied or failed requirements.
+* **Multi-Stage Plan Validation (`PlanValidator`)**:
+  * Enforces structural integrity, checks capability existence, validates permission boundaries (e.g. destructive actions blocked), and rejects forbidden command injection patterns.
+* **Controlled Stopping Conditions**:
+  * Halts cleanly on `OBJECTIVE_SATISFIED`, `NO_ACTIONABLE_INFORMATION_GAPS`, `NO_AUTHORIZED_CAPABILITIES`, `UNRESOLVED_CRITICAL_CONTRADICTION`, or `MAX_CYCLES_REACHED`.
+* **`CapabilityGap`**:
+  * Formally records unmet intelligence needs when no capable specialist is registered, creating a direct architectural bridge to Specialist Self-Development.
+
+---
+
+## 8. Running the Tests
 
 Install dependencies and run the test suite:
 
