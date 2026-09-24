@@ -48,8 +48,11 @@ class Relationship(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     source_id: str = Field(description="ID of source entity or evidence")
     target_id: str = Field(description="ID of target entity or evidence")
-    relation_type: str = Field(description="Descriptor of relationship, e.g., 'associated_with', 'derived_from'")
+    relation_type: str = Field(description="Descriptor of relationship, e.g., 'associated_with', 'resolves_to'")
+    is_inferred: bool = Field(default=False, description="True if inferred by correlation; False if explicitly observed in evidence")
+    supporting_evidence_ids: List[str] = Field(default_factory=list, description="IDs of evidence directly supporting this relationship")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    status: str = Field(default="active", description="'active', 'contradicted', 'superseded'")
     created_at: datetime = Field(default_factory=utc_now)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

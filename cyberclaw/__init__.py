@@ -7,6 +7,21 @@ from cyberclaw.capabilities.capability import Capability
 from cyberclaw.capabilities.provider import CapabilityProvider, ExecutionContext
 from cyberclaw.capabilities.registry import CapabilityRegistry
 from cyberclaw.core import CyberClawCore
+from cyberclaw.coordination.coordinator import InvestigationCoordinator
+from cyberclaw.coordination.requirements import (
+    InformationRequirement,
+    RequirementStatus,
+)
+from cyberclaw.coordination.router import RequirementRouter
+from cyberclaw.correlation.engine import CorrelationEngine, CorrelationResult
+from cyberclaw.correlation.models import ContradictionRecord, CorrelationProvenance
+from cyberclaw.correlation.rules import (
+    CertificateIdentityCorrelationRule,
+    CorrelationRule,
+    DnsResolutionCorrelationRule,
+    NetworkServiceCorrelationRule,
+    SharedInfrastructureCorrelationRule,
+)
 from cyberclaw.dfa.machine import CoreDFA, InvalidTransitionError
 from cyberclaw.dfa.states import CoreState
 from cyberclaw.events.bus import EventBus
@@ -108,4 +123,18 @@ __all__ = [
     "WorkspaceLayout",
     "WorkspaceManager",
     "WorkspaceAccessError",
+    # Coordination & Correlation
+    "InformationRequirement",
+    "RequirementStatus",
+    "RequirementRouter",
+    "InvestigationCoordinator",
+    "CorrelationEngine",
+    "CorrelationResult",
+    "CorrelationProvenance",
+    "ContradictionRecord",
+    "CorrelationRule",
+    "DnsResolutionCorrelationRule",
+    "CertificateIdentityCorrelationRule",
+    "NetworkServiceCorrelationRule",
+    "SharedInfrastructureCorrelationRule",
 ]

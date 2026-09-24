@@ -55,6 +55,17 @@ class CyberClawCore:
         self._investigations: Dict[str, Investigation] = {}
         self._is_running = False
 
+        # Initialize Global Correlation & Coordination
+        from cyberclaw.coordination.coordinator import InvestigationCoordinator
+        from cyberclaw.correlation.engine import CorrelationEngine
+        self.correlation = CorrelationEngine()
+        self.coordinator = InvestigationCoordinator(
+            specialists=self.specialists,
+            capabilities=self.capabilities,
+            event_bus=self.event_bus,
+            correlation_engine=self.correlation,
+        )
+
     @property
     def is_running(self) -> bool:
         """True if the Core system is active."""
@@ -466,3 +477,104 @@ class CyberClawCore:
         self.workspace.persist_state(investigation_id, inv.to_dict())
 
         return result
+
+    # --------------------------------------------------------------------------
+    # Global Coordination & Evidence Correlation
+    # --------------------------------------------------------------------------
+
+    def create_information_requirement(
+        self,
+        investigation_id: str,
+        description: str,
+        target_or_entity: str,
+        evidence_types_sought: Optional[List[str]] = None,
+        assigned_capability_id: Optional[str] = None,
+        priority: int = 50,
+        dependencies: Optional[List[str]] = None,
+        actor: str = "core.system",
+    ):
+        """Create and track an InformationRequirement in the global investigation."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        req = self.coordinator.create_requirement(
+            investigation=inv,
+            description=description,
+            target_or_entity=target_or_entity,
+            evidence_types_sought=evidence_types_sought,
+            assigned_capability_id=assigned_capability_id,
+            priority=priority,
+            dependencies=dependencies,
+        )
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return req
+
+    def fulfill_information_requirement(
+        self,
+        investigation_id: str,
+        requirement_id: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        actor: str = "core.system",
+    ):
+        """Route and execute an InformationRequirement across eligible Specialists."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        req = self.coordinator.fulfill_requirement(
+            investigation=inv,
+            requirement_id=requirement_id,
+            parameters=parameters,
+        )
+        self.workspace.persist_evidence(investigation_id, inv.evidence_store.list_all())
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return req
+
+    def correlate_investigation(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ):
+        """Execute the CorrelationEngine over all accumulated investigation evidence."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        result = self.coordinator.correlate(inv)
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return result
+
+    def create_hypothesis(
+        self,
+        investigation_id: str,
+        statement: str,
+        initial_confidence: float = 0.5,
+        actor: str = "core.system",
+    ):
+        """Formulate an investigative hypothesis."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        hyp = self.coordinator.create_hypothesis(
+            investigation=inv,
+            statement=statement,
+            initial_confidence=initial_confidence,
+        )
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return hyp
+
+    def evaluate_hypotheses(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ):
+        """Evaluate open hypotheses based on evidence, corroborations, and contradictions."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        res = self.coordinator.evaluate_hypotheses(inv)
+        self.workspace.persist_state(investigation_id, inv.to_dict())
+        return res

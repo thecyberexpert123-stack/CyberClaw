@@ -29,6 +29,14 @@ CyberClaw/
 │   ├── types.py                # Generic models: Entity, Source, Relationship, Hypothesis
 │   ├── core.py                 # CyberClawCore orchestrator
 │   ├── investigation.py        # Investigation case container
+│   ├── coordination/           # Global Multi-Specialist Coordination Layer
+│   │   ├── requirements.py     # InformationRequirement (OPEN, ASSIGNED, SATISFIED, SATISFIED_EMPTY, FAILED)
+│   │   ├── router.py           # Capability-based RequirementRouter
+│   │   └── coordinator.py      # InvestigationCoordinator & orchestration loop
+│   ├── correlation/            # Global Evidence Correlation & Graph Engine
+│   │   ├── engine.py           # CorrelationEngine
+│   │   ├── models.py           # CorrelationProvenance, ContradictionRecord
+│   │   └── rules.py            # Generic rules (DNS, Cert, Network Service, Shared Infrastructure)
 │   ├── dfa/                    # Deterministic Finite Automaton
 │   │   ├── states.py           # CoreState (INITIALIZE, READY, CLASSIFY, INVESTIGATE, VERIFY, RESOLVE, PAUSED, FAILED)
 │   │   └── machine.py          # CoreDFA engine with guard validation and rejection
@@ -40,6 +48,8 @@ CyberClaw/
 │   │   ├── base.py             # Specialist model
 │   │   ├── endpoint.py         # SpecialistEndpoint, SpecialistRequest, SpecialistResponse
 │   │   ├── registry.py         # SpecialistRegistry
+│   │   ├── network/            # Minimal Network Specialist (interoperability & failure isolation)
+│   │   │   └── specialist.py   # NetworkSpecialist (port scan, service probe)
 │   │   ├── self_development/  # Self-Development Framework v0.1 (controlled autonomous growth)
 │   │   │   ├── maturity.py     # SkillMaturityState (EXPERIMENTAL -> EVALUATED -> PROPOSED -> APPROVED -> TRUSTED)
 │   │   │   ├── patterns.py     # PatternDetector & PatternObservation
@@ -82,7 +92,7 @@ CyberClaw/
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 99 unit & integration tests covering all requirements
+├── tests/                      # 116 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -169,7 +179,32 @@ The Specialist Self-Development Framework provides controlled, auditable, and sa
 
 ---
 
-## 6. Running the Tests
+## 6. Global Coordination & Evidence Correlation v0.1
+
+The Global Coordination and Evidence Correlation layer enables multiple autonomous specialists (OSINT, Network, Forensics, etc.) to investigate jointly while keeping Core completely domain-agnostic:
+
+* **Information Requirements (`InformationRequirement`)**:
+  * Represents *what information is needed* rather than raw tool commands (e.g. `Need DNS info for target X`, `Need network context for IP Y`).
+  * Lifecycle: `OPEN` ──→ `ASSIGNED` ──→ `SATISFIED` | `SATISFIED_EMPTY` | `FAILED`.
+  * `SATISFIED_EMPTY` indicates normal completion with zero findings (strictly distinct from `FAILED`).
+* **Capability-Based Routing (`RequirementRouter`)**:
+  * Resolves information requirements against registered healthy specialists and capability declarations deterministically without hardcoded specialist names in Core.
+* **Correlation Engine (`CorrelationEngine`)**:
+  * **Entity Extraction**: Automatically identifies and tracks entities (`domain`, `ip`, `certificate`, `service`).
+  * **Observed vs. Inferred Distinction**:
+    * **Observed** (`is_inferred = False`): Direct findings from evidence (e.g. Domain ──`resolves_to`──> IP, IP ──`exposes_service`──> Port).
+    * **Inferred** (`is_inferred = True`): Synergies derived across disparate evidence (e.g. distinct domains co-hosted on shared infrastructure).
+  * **Correlation Provenance**: Every derived relationship references its supporting evidence IDs, generating rule, and timestamps.
+* **Contradiction Management**:
+  * Conflicting evidence (e.g. divergent resolutions from competing sources) is captured as `ContradictionRecord` without deleting historical observations.
+* **Hypotheses (`Hypothesis`)**:
+  * Working propositions evaluated against accumulated evidence (`OPEN` ──→ `SUPPORTED` | `CONTRADICTED`).
+* **Failure Isolation**:
+  * A specialist failure (e.g. Network host unreachable) does not corrupt global investigation state or affect other specialists.
+
+---
+
+## 7. Running the Tests
 
 Install dependencies and run the test suite:
 
