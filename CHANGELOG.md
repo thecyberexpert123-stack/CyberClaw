@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Capability Lifecycle & Governance v0.1
+- **`cyberclaw/capabilities/models.py`**: Introduced `CapabilityLifecycleState`, `CapabilityTrustState`, `CapabilityHealth`, `CapabilityProvenance`, `CapabilityFailureType`, `CapabilityValidationRecord`, `CapabilityFailureRecord`, `CapabilityGovernanceRecord`, `CapabilityCandidate`, and `CapabilityDiscoveryResult`.
+- **`cyberclaw/capabilities/lifecycle.py`**: State machine enforcing permissible lifecycle transitions (`PROPOSED` -> `EXPERIMENTAL` -> `VALIDATED` -> `AVAILABLE` -> `TRUSTED` -> `DEPRECATED` -> `RETIRED`, with operational control `DISABLED` and rejection `REJECTED`).
+- **`cyberclaw/capabilities/governance.py`**: Formal validation assessments, explicit authority approval gates, trust assignments, trust revocation, deprecation, retirement, and intelligence gap capability discovery.
+- **`cyberclaw/capabilities/bridge.py`**: Mediates between Self-Development framework (`ExperimentalSkill` -> candidate -> validation -> approval) and Adaptive Planning (`CapabilityGap` -> candidate/discovery), strictly enforcing that experimental skills cannot self-approve or self-promote.
+- **`cyberclaw/capabilities/registry.py`**: Version-aware registry (`capability@version`), multiple provider prioritization, health assessment, schema contract validation, and execution failure history tracking.
+- **`cyberclaw/capabilities/errors.py`**: Structured error hierarchy (`CapabilityLifecycleError`, `CapabilityTrustError`, `CapabilityPermissionError`, `CapabilityCompatibilityError`, `CapabilityGovernanceError`, `CapabilityUnavailableError`).
+- **`cyberclaw/case/models.py`**: Enhanced `ExecutionHistoryRecord` with version, provider, lifecycle state, trust state, permission scope, and validation references.
+- **Core Governance APIs**:
+  - `core.validate_capability(...)`
+  - `core.approve_capability(...)`
+  - `core.enable_capability(...)`
+  - `core.disable_capability(...)`
+  - `core.deprecate_capability(...)`
+  - `core.retire_capability(...)`
+  - `core.grant_capability_trust(...)`
+  - `core.revoke_capability_trust(...)`
+  - `core.get_capability_health(...)`
+  - `core.discover_capabilities_for_gap(...)`
+- **Comprehensive Test Suite**:
+  - `tests/test_capability_lifecycle.py`: Identity, versioning, transitions, illegal transitions, trust separation, revocation, and governance audit trails.
+  - `tests/test_capability_execution_and_health.py`: Multi-provider fallback, provider failure vs capability unavailable, health computation, schema mismatch, and malformed provider results.
+  - `tests/test_capability_security_and_governance.py`: Untrusted execution rejection, permission enforcement on trusted capabilities, destructive scope approval gates, and branch registry isolation.
+  - `tests/test_capability_self_dev_and_gap_bridge.py`: CapabilityGap discovery recommendations, experimental skill bridge, and rejection of unevaluated or self-approved promotions.
+  - `tests/test_capability_e2e_scenario.py`: Section 27 full lifecycle scenario (Gap -> Candidate -> Experiment -> Validation -> Approval -> Registration -> Health -> Execution -> Failure -> Degradation -> Disable -> Revalidation -> Re-enable -> Deprecate -> Retire -> Replay verification).
+
 ### Added - Investigation Branching & Counterfactual Analysis v0.1
 - **`cyberclaw/branching/models.py`**: `InvestigationBranch`, `BranchStatus`, `BranchJournalEntry`, `BranchComparison`, and `CandidateBranchExperience` models supporting counterfactual exploration without mutating authoritative history.
 - **`cyberclaw/branching/engine.py`**: Deterministic `BranchEngine` managing branch creation from verified snapshots, simulated requirements, hypothesis shifts, branch replay, unranked factual branch comparisons, and candidate experience handling.

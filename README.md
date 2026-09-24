@@ -349,7 +349,43 @@ The Investigation Branching and Counterfactual Analysis subsystem allows CyberCl
 
 ---
 
-## 11. Running the Tests
+## 11. Capability Lifecycle & Governance v0.1
+
+The Capability Lifecycle & Governance layer formalizes the operational lifecycle, decoupled trust tiers, provenance, and authority boundaries of capabilities across CyberClaw:
+
+> **CORE PRINCIPLES OF CAPABILITY GOVERNANCE:**  
+> 1. **CAPABILITY EXISTENCE ≠ CAPABILITY AUTHORITY**: A capability being registered does NOT mean it is authorized to execute.  
+> 2. **EXPERIMENTAL SUCCESS ≠ TRUST**: A skill succeeding in an experiment does NOT grant it production trust.  
+> 3. **REGISTRATION ≠ EXECUTION AUTHORIZATION**: Execution requires passing DFA state checks, schema validation, actor permissions, and action scopes.  
+> 4. **TRUST ≠ UNLIMITED PERMISSION**: Even a `FULLY_TRUSTED` capability must strictly adhere to permission policy and action scopes (`REVERSIBLE`, `CONSEQUENTIAL`, `DESTRUCTIVE`).
+
+* **Stable Identity & Versioning**:
+  * Capabilities possess explicit semantic versioning (`capability.network.service_probe@1.0.0` vs `@2.0.0`).
+  * Historical case records preserve the exact capability version invoked, ensuring deterministic historical replay remains unaffected by future capability updates.
+* **Deterministic Lifecycle States**:
+  * `PROPOSED` ──► `EXPERIMENTAL` ──► `VALIDATED` ──► `AVAILABLE` ──► `TRUSTED` ──► `DEPRECATED` ──► `RETIRED`.
+  * Operational control transitions: `AVAILABLE` ◄──► `DISABLED`, `DISABLED` ──► `RETIRED`.
+  * Terminal failure states: `REJECTED`, `RETIRED`. Illegal lifecycle jumps raise `CapabilityLifecycleError`.
+* **Decoupled Trust Model**:
+  * Trust is distinct from availability: `UNTRUSTED`, `PROVISIONAL`, `TRUSTED_WITH_SCOPE`, `FULLY_TRUSTED`, `REVOKED`.
+  * Capabilities in `UNTRUSTED` or `REVOKED` state cannot be executed in production.
+* **Capability Provenance**:
+  * Explicit origin tracking: `CORE_REGISTERED`, `SPECIALIST_REGISTERED`, `EXPERIMENTAL_SKILL`, `PROMOTED_SKILL`, `ADMIN_REGISTERED`, `FUTURE_EXTERNAL_SOURCE`.
+* **Validation & Governance Records**:
+  * `CapabilityValidationRecord`: Durable audit of formal test assessments, verification scopes, and results (`PASSED`, `FAILED`, `CONDITIONAL`).
+  * `CapabilityGovernanceRecord`: Immutable audit trail of every lifecycle transition, trust assignment, and administrative rationale.
+* **Provider Multi-Tenancy & Health Assessment**:
+  * A single capability can be backed by multiple providers with descending priorities.
+  * Health states: `HEALTHY`, `DEGRADED`, `UNAVAILABLE`, `UNKNOWN`. Provider outages degrade health without destroying capability trust.
+* **Self-Development & Planning Gap Bridge**:
+  * `CapabilityBridge`:
+    * Translates `CapabilityGap` into `CapabilityCandidate` for discovery and planning.
+    * Converts evaluated `ExperimentalSkill` into `CapabilityCandidate`.
+    * **No Self-Approval**: Experimental skills CANNOT self-promote or self-approve directly into trusted capabilities. Validation verifies; explicit human or policy authority decides.
+
+---
+
+## 12. Running the Tests
 
 Install dependencies and run the test suite:
 

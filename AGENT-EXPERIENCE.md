@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Capability Lifecycle & Governance v0.1
+
+### Lesson 9: Decoupling Lifecycle Availability from Trust Tiers
+- **Observation**: Systems often treat "registered and enabled" as synonymous with "trusted to execute".
+- **Consequence**: An experimental capability under sandbox evaluation or a recently re-enabled tool could be prematurely scheduled for autonomous execution, bypassing organizational trust gates.
+- **Resolution**: Separated `CapabilityLifecycleState` (`PROPOSED`, `EXPERIMENTAL`, `VALIDATED`, `AVAILABLE`, `TRUSTED`, `DEPRECATED`, `DISABLED`, `RETIRED`) from `CapabilityTrustState` (`UNTRUSTED`, `PROVISIONAL`, `TRUSTED_WITH_SCOPE`, `FULLY_TRUSTED`, `REVOKED`). Execution strictly requires both an active lifecycle state (`AVAILABLE` or `TRUSTED`) and an approved trust tier (`TRUSTED_WITH_SCOPE` or `FULLY_TRUSTED`).
+
+### Lesson 10: Provider Fault Isolation vs. Capability Operational Status
+- **Observation**: Temporary upstream provider outages (e.g. third-party rate limits, network blips) frequently lead to capabilities being permanently marked as broken or invalid.
+- **Consequence**: Transient provider unavailability causes unnecessary capability churn and destroys historical provenance.
+- **Resolution**: Separated the logical capability definition from its backing providers. Multi-provider priority fallbacks and a distinct `CapabilityHealth` model (`HEALTHY`, `DEGRADED`, `UNAVAILABLE`) ensure that provider outages transition health without altering registered trust or mutating immutable capability governance records.
+
+### Lesson 11: Immutable Version References in Case History
+- **Observation**: When capabilities evolve across versions (e.g. `v1.0.0` to `v2.0.0`), subsequent changes to schemas or provider implementations can alter the meaning of historical executions.
+- **Consequence**: Deterministic time-travel replay breaks or misinterprets historical findings if execution records only store unversioned capability slugs.
+- **Resolution**: `ExecutionHistoryRecord` explicitly stores `capability_id`, `capability_version`, `provider_id`, `lifecycle_state`, `trust_state`, and `action_scope`. Replay consumes these records as immutable historical facts rather than consulting current live registry configurations.
+
 ## Milestone: Investigation Branching & Counterfactual Analysis v0.1
 
 ### Lesson 5: Clear Separation of Authoritative Truth vs. Counterfactual Hypothesis

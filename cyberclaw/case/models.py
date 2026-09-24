@@ -191,6 +191,14 @@ class ExecutionHistoryRecord(BaseModel):
     requirement_id: str
     specialist_id: str
     capability_id: str
+    capability_version: str = Field(default="1.0.0", description="Version of capability executed")
+    provider_id: Optional[str] = Field(default=None, description="ID of provider that executed")
+    provider_version: Optional[str] = Field(default=None, description="Version of provider if available")
+    lifecycle_state: str = Field(default="AVAILABLE", description="Lifecycle state at time of execution")
+    trust_state: str = Field(default="TRUSTED_WITH_SCOPE", description="Trust state at time of execution")
+    permission_scope: str = Field(default="reversible", description="Permission scope enforced")
+    action_scope: str = Field(default="consequential", description="Action scope enforced")
+    validation_reference: Optional[str] = Field(default=None, description="Reference to validation record if applicable")
     status: str
     duration_ms: Optional[float] = None
     evidence_count: int = 0

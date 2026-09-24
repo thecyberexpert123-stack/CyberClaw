@@ -459,7 +459,7 @@ class CyberClawCore:
                     ev.provenance.specialist_id = resolved_specialist_id
                 if not ev.provenance.capability_id:
                     ev.provenance.capability_id = capability_id
-                inv.evidence_store.add(ev)
+                inv.add_evidence(ev)
 
             # 5. Propagate evidence event
             self.event_bus.publish(
@@ -474,6 +474,22 @@ class CyberClawCore:
                     },
                 )
             )
+
+        # Record execution in case history
+        inv.case_manager.record_execution(
+            requirement_id=str(uuid4()),
+            specialist_id=resolved_specialist_id or "core.registry",
+            capability_id=capability_id,
+            capability_version=capability.version,
+            status=result.status.value,
+            duration_ms=result.duration_ms,
+            evidence_count=len(result.evidence),
+            evidence_ids=[ev.id for ev in result.evidence],
+            error=result.error,
+            lifecycle_state=capability.lifecycle_state.value,
+            trust_state=capability.trust_state.value,
+            action_scope=scope.value,
+        )
 
         # Observability for execution
         evidence_ids = [ev.id for ev in result.evidence]
@@ -1028,6 +1044,141 @@ class CyberClawCore:
             authoritative_evidence_ids={e.id for e in inv.evidence_store.list_all()},
         )
         return True
+
+    # --------------------------------------------------------------------------
+    # Capability Lifecycle & Governance
+    # --------------------------------------------------------------------------
+
+    def validate_capability(
+        self,
+        capability_id: str,
+        validation_record: Any,
+        actor: str = "core.system",
+    ):
+        """Record formal validation for a capability."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.validate_capability(cap, validation_record, actor=actor)
+
+    def approve_capability(
+        self,
+        capability_id: str,
+        approver: str = "core.admin",
+        rationale: str = "",
+        target_state: Any = None,
+        trust_state: Any = None,
+    ):
+        """Formally approve a capability for operational use."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        from cyberclaw.capabilities.models import CapabilityLifecycleState, CapabilityTrustState
+        return CapabilityGovernance.approve_capability(
+            capability=cap,
+            approver=approver,
+            rationale=rationale,
+            target_state=target_state or CapabilityLifecycleState.AVAILABLE,
+            trust_state=trust_state or CapabilityTrustState.TRUSTED_WITH_SCOPE,
+        )
+
+    def enable_capability(
+        self,
+        capability_id: str,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Re-enable a previously disabled capability."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.enable_capability(cap, actor=actor, rationale=rationale)
+
+    def disable_capability(
+        self,
+        capability_id: str,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Temporarily disable a capability from execution."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.disable_capability(cap, actor=actor, rationale=rationale)
+
+    def deprecate_capability(
+        self,
+        capability_id: str,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Mark a capability as deprecated."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.deprecate_capability(cap, actor=actor, rationale=rationale)
+
+    def retire_capability(
+        self,
+        capability_id: str,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Permanently retire a capability from active selection."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.retire_capability(cap, actor=actor, rationale=rationale)
+
+    def grant_capability_trust(
+        self,
+        capability_id: str,
+        trust_state: Any,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Assign trust tier to a capability."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.grant_trust(cap, target_trust=trust_state, actor=actor, rationale=rationale)
+
+    def revoke_capability_trust(
+        self,
+        capability_id: str,
+        actor: str = "core.admin",
+        rationale: str = "",
+    ):
+        """Revoke trust tier from a capability."""
+        cap = self.capabilities.get_capability(capability_id)
+        if not cap:
+            raise KeyError(f"Capability '{capability_id}' not found.")
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        return CapabilityGovernance.revoke_trust(cap, actor=actor, rationale=rationale)
+
+    def get_capability_health(
+        self,
+        capability_id: str,
+    ):
+        """Evaluate operational health status of a capability."""
+        return self.capabilities.get_capability_health(capability_id)
+
+    def discover_capabilities_for_gap(
+        self,
+        gap: Any,
+    ):
+        """Discover existing, unavailable, deprecated, or candidate capabilities for an intelligence gap."""
+        from cyberclaw.capabilities.governance import CapabilityGovernance
+        all_caps = self.capabilities.list_capabilities(include_retired=True, include_disabled=True)
+        return CapabilityGovernance.discover_capabilities_for_gap(gap, all_caps)
+
 
 
 

@@ -134,6 +134,11 @@ class ValidationPipeline:
         approval_granted: bool = False,
     ) -> None:
         """Execute the full pre-execution validation pipeline."""
+        # 0. Lifecycle & Trust Validation
+        executable, reason = capability.is_executable()
+        if not executable:
+            raise PolicyValidationError(reason or f"Capability '{capability.versioned_id}' cannot be executed.")
+
         # 1. State Validation
         cls.validate_dfa_state(current_state, allowed_states, capability.id)
         # 2. Schema Validation
