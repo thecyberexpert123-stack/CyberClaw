@@ -71,6 +71,7 @@ class CaseManager:
         status: str,
         duration_ms: Optional[float] = None,
         evidence_count: int = 0,
+        evidence_ids: Optional[List[str]] = None,
         error: Optional[str] = None,
     ) -> ExecutionHistoryRecord:
         """Log specialist execution details."""
@@ -89,7 +90,13 @@ class CaseManager:
             entry_type=JournalEntryType.REQUIREMENT_EXECUTED,
             summary=f"Specialist '{specialist_id}' executed capability '{capability_id}' for requirement '{requirement_id}': {status}",
             reference_id=requirement_id,
-            details={"specialist": specialist_id, "capability": capability_id, "status": status, "evidence_count": evidence_count},
+            details={
+                "specialist": specialist_id,
+                "capability": capability_id,
+                "status": status,
+                "evidence_count": evidence_count,
+                "evidence_ids": evidence_ids or [],
+            },
         )
         return rec
 

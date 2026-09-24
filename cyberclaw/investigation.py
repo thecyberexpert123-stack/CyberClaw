@@ -72,7 +72,13 @@ class Investigation(BaseModel):
                 return existing
 
         entity = Entity(type=type, name=name, attributes=attributes or {})
-        self.entities[entity.id] = entity
+        self.entities[name] = entity
+        self.record_journal_entry(
+            entry_type="CORRELATION_COMPLETED",
+            summary=f"Entity added: {name} ({type})",
+            reference_id=entity.id,
+            details={"entities": [{"id": entity.id, "type": type, "name": name, "attributes": attributes or {}}]},
+        )
         return entity
 
     def create_hypothesis(self, statement: str, initial_confidence: float = 0.5) -> Hypothesis:
@@ -84,6 +90,12 @@ class Investigation(BaseModel):
             confidence=initial_confidence,
         )
         self.hypotheses[hyp.id] = hyp
+        self.record_journal_entry(
+            entry_type="HYPOTHESIS_EVALUATED",
+            summary=f"Hypothesis formulated: '{statement}'",
+            reference_id=hyp.id,
+            details={"hypothesis_id": hyp.id, "statement": statement, "status": "OPEN", "confidence": initial_confidence},
+        )
         return hyp
 
     def create_information_requirement(
@@ -106,7 +118,23 @@ class Investigation(BaseModel):
             dependencies=dependencies or [],
         )
         self.information_requirements[req.id] = req
+        self.record_journal_entry(
+            entry_type="REQUIREMENT_CREATED",
+            summary=f"Requirement created for {target_or_entity}: {description}",
+            reference_id=req.id,
+            details={"target": target_or_entity, "capability": assigned_capability_id, "evidence_types": req.evidence_types_sought},
+        )
         return req
+
+    def add_evidence(self, evidence: Any) -> None:
+        """Add structured evidence to the evidence store and journal the event."""
+        self.evidence_store.add(evidence)
+        self.record_journal_entry(
+            entry_type="EVIDENCE_INGESTED",
+            summary=f"Ingested evidence: {evidence.subject} ({evidence.type})",
+            reference_id=evidence.id,
+            details={"evidence_ids": [evidence.id]},
+        )
 
     # --------------------------------------------------------------------------
     # Long-Horizon Case State, Snapshots & Decisions
@@ -186,6 +214,34 @@ class Investigation(BaseModel):
         if not snap:
             raise KeyError(f"Snapshot '{sequence_or_id}' not found.")
         return self.case_manager.snapshots.explain(snap)
+
+    def replay(
+        self,
+        until_sequence: Optional[int] = None,
+        from_snapshot: Optional[Union[int, str]] = None,
+        until_snapshot: Optional[Union[int, str]] = None,
+    ):
+        """Deterministically reconstruct historical state without executing live tools."""
+        from cyberclaw.replay.engine import ReplayEngine
+        return ReplayEngine.replay(
+            self,
+            until_sequence=until_sequence,
+            from_snapshot=from_snapshot,
+            until_snapshot=until_snapshot,
+        )
+
+    def query_historical_state(self, sequence: Optional[int] = None):
+        """Perform a time-travel state query at a specific sequence index."""
+        from cyberclaw.replay.engine import ReplayEngine
+        return ReplayEngine.replay(self, until_sequence=sequence)
+
+    def explain_progression(self, from_sequence: int = 1, to_sequence: Optional[int] = None):
+        """Explain state progression and historical delta between two sequences."""
+        from cyberclaw.replay.engine import ReplayEngine
+        max_seq = len(self.case_manager.journal.entries)
+        return ReplayEngine.explain_progression(
+            self, from_sequence=from_sequence, to_sequence=to_sequence or max_seq
+        )
 
     def get_case_state(self):
         """Assemble the complete CaseState object adhering to the conceptual model."""

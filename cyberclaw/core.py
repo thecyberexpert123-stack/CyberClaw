@@ -584,7 +584,15 @@ class CyberClawCore:
             status=req.status.value,
             duration_ms=None,
             evidence_count=len(req.resulting_evidence_ids),
+            evidence_ids=list(req.resulting_evidence_ids),
         )
+        if req.resulting_evidence_ids:
+            inv.record_journal_entry(
+                entry_type=JournalEntryType.EVIDENCE_INGESTED,
+                summary=f"Ingested {len(req.resulting_evidence_ids)} evidence item(s) from requirement '{req.id}'",
+                reference_id=req.id,
+                details={"evidence_ids": list(req.resulting_evidence_ids)},
+            )
         inv.record_decision(
             decision_type=DecisionType.REQUIREMENT_RESOLUTION,
             actor="core.coordinator",
@@ -820,5 +828,77 @@ class CyberClawCore:
         if not inv:
             raise KeyError(f"Investigation '{investigation_id}' not found.")
         return inv.get_case_state()
+
+    # --------------------------------------------------------------------------
+    # Deterministic Investigation Replay & Time-Travel
+    # --------------------------------------------------------------------------
+
+    def replay_investigation(
+        self,
+        investigation_id: str,
+        until_sequence: Optional[int] = None,
+        from_snapshot: Optional[Union[int, str]] = None,
+        until_snapshot: Optional[Union[int, str]] = None,
+        actor: str = "core.system",
+    ):
+        """Deterministically reconstruct historical state without executing live tools or mutating state."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        from cyberclaw.replay.engine import ReplayEngine
+        return ReplayEngine.replay(
+            inv,
+            until_sequence=until_sequence,
+            from_snapshot=from_snapshot,
+            until_snapshot=until_snapshot,
+        )
+
+    def query_historical_state(
+        self,
+        investigation_id: str,
+        sequence: Optional[int] = None,
+        actor: str = "core.system",
+    ):
+        """Perform a read-only time-travel query at a specific sequence index."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        from cyberclaw.replay.engine import ReplayEngine
+        return ReplayEngine.replay(inv, until_sequence=sequence)
+
+    def explain_case_progression(
+        self,
+        investigation_id: str,
+        from_sequence: int = 1,
+        to_sequence: Optional[int] = None,
+        actor: str = "core.system",
+    ):
+        """Explain state progression and historical delta between two sequences."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        from cyberclaw.replay.engine import ReplayEngine
+        max_seq = len(inv.case_manager.journal.entries)
+        return ReplayEngine.explain_progression(
+            inv, from_sequence=from_sequence, to_sequence=to_sequence or max_seq
+        )
+
+    def validate_case_history(
+        self,
+        investigation_id: str,
+        actor: str = "core.system",
+    ) -> bool:
+        """Validate sequence ordering, snapshot integrity, and decision references for a case."""
+        inv = self.get_investigation(investigation_id, actor=actor)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        from cyberclaw.replay.engine import ReplayEngine
+        ReplayEngine.validate_case_history(
+            inv.case_manager.journal.entries,
+            inv.case_manager.snapshots.snapshots,
+            inv.case_manager.journal.decisions,
+        )
+        return True
+
 
 

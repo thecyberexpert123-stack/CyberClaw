@@ -287,7 +287,37 @@ The Long-Horizon Investigation Memory & Case State layer enables CyberClaw to ma
 
 ---
 
-## 9. Running the Tests
+## 9. Investigation Replay & Deterministic Time-Travel v0.1
+
+The Investigation Replay and Deterministic Time-Travel subsystem enables CyberClaw to audit, reconstruct, and analyze past investigation state with mathematical determinism without re-executing tools or altering live investigation posture:
+
+* **Snapshot vs. Replay Distinction**:
+  * **`InvestigationSnapshot`**: A static, persisted point-in-time state artifact.
+  * **`ReplayEngine`**: A dynamic, deterministic reconstruction process. Replay consumes ordered historical records (`JournalEntry`, `DecisionRecord`, `Evidence`) and applies state transitions sequentially from sequence 0 or fast-forwards from a validated snapshot checkpoint.
+* **Deterministic Reconstruction**:
+  * Pure data transformation: Independent repeated replays over identical historical records produce logically identical reconstructed states with identical cryptographic SHA-256 digests (`state_digest`).
+  * Free from wall-clock dependencies, live network calls, active provider readiness, or live tool execution.
+* **Historical Immutability & Read-Only Guarantees**:
+  * Replay operates on deep copies and NEVER mutates the live `Investigation`, `CaseState`, snapshots, journal, or global `ExperienceStore`.
+  * Security boundary: Replay is strictly data processing; historical commands/strings are never executed.
+* **Decision Replay Semantics**:
+  * Decisions are reconstructed as historical facts directly from `DecisionRecord` objects. The system never re-invokes contemporary planning or evaluation rules to guess what occurred historically.
+  * Version isolation: Cases generated under planner version X remain replayable even after planner version Y is released.
+* **Journal Validation & Corruption Handling**:
+  * `HistoryValidator` validates sequence continuity prior to reconstruction:
+    * Sequence gaps or duplicate sequence numbers raise `ReplaySequenceError`.
+    * Tampered snapshots (SHA-256 hash mismatch) raise `ReplayIntegrityError`.
+    * Impossible state transitions or broken references raise `CorruptedHistoryError`.
+    * Out-of-bounds target sequence requests raise `ReplayBoundsError`.
+    * Corrupted history is rejected immediately; it is never silently repaired or fabricated.
+* **Time-Travel Query APIs**:
+  * `core.replay_investigation(investigation_id, until_sequence=N, from_snapshot=K, until_snapshot=M)`
+  * `core.query_historical_state(investigation_id, sequence=N)`: Inspects exact state (DFA, evidence, entities, hypotheses, requirements, decisions, contradictions) at sequence $N$.
+  * `core.explain_case_progression(investigation_id, from_sequence=A, to_sequence=B)`: Provides human-readable chronological trace of events and state deltas between two sequence milestones.
+
+---
+
+## 10. Running the Tests
 
 Install dependencies and run the test suite:
 

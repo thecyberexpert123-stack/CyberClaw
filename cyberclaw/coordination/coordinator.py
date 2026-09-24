@@ -64,6 +64,17 @@ class InvestigationCoordinator:
             completion_criteria=completion_criteria or {},
         )
         investigation.information_requirements[req.id] = req
+        investigation.record_journal_entry(
+            entry_type="REQUIREMENT_CREATED",
+            summary=f"Requirement created for {target_or_entity}: {description}",
+            reference_id=req.id,
+            details={
+                "requirement_id": req.id,
+                "target": target_or_entity,
+                "capability": assigned_capability_id,
+                "evidence_types": req.evidence_types_sought,
+            },
+        )
 
         self.event_bus.publish(
             Event(
@@ -230,16 +241,20 @@ class InvestigationCoordinator:
         )
 
         # Update entities
+        new_ents = []
         for ent in res.new_entities:
-            investigation.entities[ent.name] = ent
+            created_ent = investigation.add_entity(ent.type, ent.name, ent.attributes)
+            new_ents.append(created_ent.model_dump())
 
         # Update relationships
+        new_rels = []
         existing_rel_keys = {(r.source_id, r.target_id, r.relation_type) for r in investigation.relationships}
         for rel in res.new_relationships:
             key = (rel.source_id, rel.target_id, rel.relation_type)
             if key not in existing_rel_keys:
                 investigation.relationships.append(rel)
                 existing_rel_keys.add(key)
+                new_rels.append(rel.model_dump())
                 self.event_bus.publish(
                     Event(
                         type="relationship.created",
@@ -255,10 +270,23 @@ class InvestigationCoordinator:
                     )
                 )
 
+        if new_ents or new_rels:
+            investigation.record_journal_entry(
+                entry_type="CORRELATION_COMPLETED",
+                summary=f"Correlation discovered {len(new_ents)} entity/entities and {len(new_rels)} relationship(s)",
+                details={"entities": new_ents, "relationships": new_rels},
+            )
+
         # Update contradictions
         for contra in res.contradictions:
             if not any(c.description == contra.description for c in investigation.contradictions):
                 investigation.contradictions.append(contra)
+                investigation.record_journal_entry(
+                    entry_type="CONTRADICTION_DETECTED",
+                    summary=f"Contradiction detected: {contra.description}",
+                    reference_id=contra.id,
+                    details={"contradiction": contra.model_dump()},
+                )
                 self.event_bus.publish(
                     Event(
                         type="relationship.contradicted",
@@ -326,6 +354,13 @@ class InvestigationCoordinator:
 
             hyp.updated_at = utc_now()
             evaluated.append(hyp)
+
+            investigation.record_journal_entry(
+                entry_type="HYPOTHESIS_EVALUATED",
+                summary=f"Hypothesis '{hyp.id}' status updated to {hyp.status} (confidence: {hyp.confidence:.2f})",
+                reference_id=hyp.id,
+                details={"hypothesis_id": hyp.id, "status": hyp.status, "confidence": hyp.confidence},
+            )
 
             self.event_bus.publish(
                 Event(

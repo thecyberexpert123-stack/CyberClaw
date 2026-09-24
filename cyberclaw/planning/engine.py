@@ -65,21 +65,19 @@ class AdaptivePlanningEngine:
         # 3. Convert Valid Candidates to InformationRequirements
         if val_res.is_valid and auto_convert_candidates and plan.candidate_next_requirements:
             for cand in plan.candidate_next_requirements:
-                req = InformationRequirement(
-                    investigation_id=investigation.id,
+                req = investigation.create_information_requirement(
                     description=cand.purpose,
                     evidence_types_sought=cand.requested_evidence_types,
                     target_or_entity=cand.target_or_entity,
                     assigned_capability_id=cand.required_capability,
                     priority=cand.priority,
                     dependencies=cand.dependencies,
-                    metadata={
-                        "candidate_id": cand.candidate_id,
-                        "value_dimension": cand.value_dimension.value,
-                        "uncertainty_type": cand.uncertainty_type.value,
-                    },
                 )
-                investigation.information_requirements[req.id] = req
+                req.metadata = {
+                    "candidate_id": cand.candidate_id,
+                    "value_dimension": cand.value_dimension.value,
+                    "uncertainty_type": cand.uncertainty_type.value,
+                }
 
             plan.plan_status = PlanStatus.EXECUTED
 
