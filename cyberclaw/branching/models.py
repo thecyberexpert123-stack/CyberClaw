@@ -83,6 +83,20 @@ class InvestigationBranch(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     is_counterfactual: bool = Field(default=True, description="Always True; branches represent counterfactual analysis, not facts")
 
+    @property
+    def id(self) -> str:
+        return self.branch_id
+
+    @property
+    def current_state(self) -> Any:
+        from cyberclaw.dfa.states import CoreState
+        if self.derived_state and self.derived_state.dfa_state:
+            try:
+                return CoreState(self.derived_state.dfa_state)
+            except ValueError:
+                pass
+        return CoreState.INVESTIGATE
+
     def get_latest_local_sequence(self) -> int:
         """Return the highest local sequence number in the branch journal."""
         return len(self.journal)

@@ -20,6 +20,8 @@ class WorkspaceLayout:
         "snapshots",     # Point-in-time sealed investigation snapshots
         "journal",       # Chronological case journal and decision trail
         "branches",      # Isolated branch contexts and counterfactual history
+        "collaboration", # Collaboration requests, conflicts, and dependency graphs
+        "knowledge",     # Temporal Knowledge Graph nodes, edges, manifests, integrity
     ]
 
     def __init__(self, root: Path) -> None:
@@ -34,6 +36,8 @@ class WorkspaceLayout:
         self.snapshots = self.root / "snapshots"
         self.journal = self.root / "journal"
         self.branches = self.root / "branches"
+        self.collaboration = self.root / "collaboration"
+        self.knowledge = self.root / "knowledge"
 
     def ensure_directories(self) -> None:
         """Create all standard workspace subdirectories if they do not exist."""

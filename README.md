@@ -108,12 +108,37 @@ CyberClaw/
 │   │   ├── recovery.py         # RuntimeRecoveryManager (crash reconciliation across claim & execution stages)
 │   │   ├── persistence.py      # RuntimePersistenceManager (atomic state serialization)
 │   │   └── errors.py           # Explicit failure taxonomy & exception hierarchy
+│   ├── collaboration/          # Multi-Specialist Collaboration & Evidence Consensus v0.1
+│   │   ├── models.py           # CollaborationRequest, CollaborationResult, ConflictStatus, ConsensusStatus, Sensitivity
+│   │   ├── protocol.py         # CollaborationLifecycleDFA & least-privilege ContextFilter
+│   │   ├── dependencies.py     # CollaborationDependencyGraph, cycle detection, hard/soft readiness gating
+│   │   ├── routing.py          # CollaborationRouter evaluating health, workload, capabilities, and requirements
+│   │   ├── evidence.py         # EvidenceHandoffNormalizer, epistemic classification (6 finding natures), provenance lineage
+│   │   ├── conflicts.py        # ConflictDetector, ConflictManager, and SpecialistConflict lifecycle
+│   │   ├── consensus.py        # Explainable ConsensusEngine, source independence, and hypothesis synthesis
+│   │   ├── coordinator.py      # Central CollaborationCoordinator integrating Runtime, Policy, and Case state
+│   │   ├── persistence.py      # CollaborationPersistenceManager (atomic workspace persistence)
+│   │   └── errors.py           # Structured failure taxonomy & exception hierarchy
+│   ├── knowledge/              # Temporal Evidence & Knowledge Graph v0.1
+│   │   ├── models.py           # Diagnostic models, NodeType, RelationshipType, KnowledgeGap
+│   │   ├── nodes.py            # KnowledgeNode immutable container and deterministic SHA-256 digest
+│   │   ├── edges.py            # KnowledgeEdge immutable relationship, epistemic nature, confidence, status
+│   │   ├── temporal.py         # TemporalInterval, temporal validity window, contradiction classification
+│   │   ├── provenance.py       # ProvenanceRecord, recursive backward lineage tracing, source independence
+│   │   ├── graph.py            # TemporalKnowledgeGraph multi-index, SHA-256 graph digest, integrity verification
+│   │   ├── queries.py          # Current/Historical views, query filtering, planning gaps, explanations
+│   │   ├── traversal.py        # GraphTraversalEngine bounded multi-hop traversal with cycle protection
+│   │   ├── mutations.py        # Governed GraphMutationRequest/Pipeline with PolicyEngine authorization
+│   │   ├── materialization.py  # Deterministic state materialization from authoritative CaseState/Investigation
+│   │   ├── consistency.py      # KnowledgeConsistencyEngine (contradictions, gaps, dangling refs, cycles)
+│   │   ├── persistence.py      # KnowledgePersistenceManager atomic serialization & integrity reload
+│   │   └── errors.py           # Structured Knowledge Graph exception taxonomy
 │   ├── validation/             # Multi-phase Validation Pipeline
 │   │   ├── errors.py           # Schema, Policy, State, and Result validation errors
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 261 unit & integration tests covering all requirements
+├── tests/                      # 341 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -513,7 +538,110 @@ CyberClaw's investigation workflows execute as resumable, observable, event-driv
 
 ---
 
-## 14. Running the Tests
+## 14. Multi-Specialist Collaboration & Evidence Consensus v0.1
+
+CyberClaw supports structured, peer-to-peer and coordinated collaboration between semi-autonomous Specialist Brains without bypassing Core governance, mutating authoritative state directly, granting self-permissions, silently overwriting findings, or treating disagreement as failure.
+
+### Core Collaboration Axioms
+1. **`SPECIALIST AUTONOMY ≠ SPECIALIST AUTHORITY`**: Specialists reason and propose independently; only the Core authorizes and records mutations.
+2. **`MESSAGE ≠ EXECUTION`**: Passing a structured collaboration message does not constitute permission or capability execution.
+3. **`REQUEST ≠ PERMISSION`**: Asking assistance from another specialist never bypasses the PolicyEngine or capability trust tier.
+4. **`EVIDENCE ≠ TRUTH`**: Evidence represents captured or inferred facts; corroboration is required before hypotheses become supported.
+5. **`CORROBORATION ≠ PROOF`**: Independent corroboration increases epistemic confidence; it does not eliminate uncertainty.
+6. **`DISAGREEMENT ≠ FAILURE`**: Competing specialist claims are preserved as explicit conflicts rather than silently discarded or overwritten.
+7. **`CORRELATION ≠ FACT`**: Correlated indicators suggest relationships requiring targeted empirical observation.
+8. **`INFERENCE ≠ OBSERVATION`**: Inferences receive epistemic discounting and can never be disguised as empirical observations.
+9. **`SPECIALIST RESULT ≠ AUTHORITATIVE CASE MUTATION`**: Specialist findings must be normalized, evaluated for conflicts, and reviewed before case hypothesis updates.
+
+> *"THE SPECIALIST PROPOSES. THE COORDINATOR VALIDATES. THE GRAPH GATES READINESS. THE POLICY ENGINE AUTHORIZES. THE RUNTIME ORCHESTRATES. THE SPECIALIST EXECUTES. THE NORMALIZER CLASSIFIES. THE CONFLICT DETECTOR PRESERVES DIVERGENCE. THE CONSENSUS ENGINE WEIGHS INDEPENDENCE. THE CASE JOURNAL MAKES IT IMMUTABLE."*
+
+### Key Subsystems & Architectural Guarantees
+* **Deterministic Collaboration Lifecycle DFA (`CollaborationLifecycleDFA`)**:
+  * Formal lifecycle progression: `PROPOSED -> VALIDATING -> AUTHORIZED -> ROUTED -> ACCEPTED -> IN_PROGRESS -> RESULT_RECEIVED -> EVALUATED -> COMPLETED`.
+  * Governed alternate terminal/gating states: `REJECTED`, `DEFERRED`, `CANCELLED`, `FAILED`, `EXPIRED`, `BLOCKED`.
+  * Arbitrary or illegal state transitions raise `CollaborationStateTransitionError`.
+* **Explicit Dependency DAG & Cycle Detection (`CollaborationDependencyGraph`)**:
+  * Models explicit dependency edges: `depends_on`, `blocks`, `unblocks`, `derived_from`, `corroborates`, `contradicts`.
+  * Self-referential and multi-hop cycles are detected via DFS and rejected with `DependencyCycleError`.
+  * Hard dependencies enforce strict readiness gating (`is_blocked`); soft dependencies allow execution to proceed under an explicit uncertainty marker.
+* **Domain-Neutral Collaboration Routing (`CollaborationRouter`)**:
+  * Evaluates health status (`HEALTHY`, `DEGRADED`, `UNHEALTHY`), capability availability, workload capacity, and requirement specifications.
+  * Disqualifies unhealthy, overloaded, or missing-capability specialists with auditable explanations.
+* **Epistemic Classification & Lineage Preservation (`EvidenceHandoffNormalizer`)**:
+  * Strictly categorizes findings into 6 epistemic natures: `OBSERVATION`, `INFERENCE`, `CORRELATION`, `HYPOTHESIS`, `NEGATIVE_FINDING`, and `FAILURE`.
+  * Inferences are never converted into observations; direct empirical observations are distinguished from deductive conclusions.
+  * Full provenance metadata is preserved: `specialist_id`, `capability_id`, `capability_version`, `authorization_decision_id`, `derived_from_evidence_ids`, and originating request links.
+* **Specialist Conflict Detection & Lifecycle (`ConflictDetector`, `ConflictManager`)**:
+  * Automatically detects contradictory claims on shared investigative subjects.
+  * Preserves both competing claims without overwriting (Evidence Immutability strictly enforced).
+  * Conflict lifecycle: `OPEN -> UNDER_REVIEW -> CORROBORATING -> RESOLVED` or `PERSISTENT` / `ABANDONED`.
+* **Explainable Consensus Engine (`ConsensusEngine`)**:
+  * Evaluates evidence corroboration, contradiction, temporal relevance, and source independence.
+  * Identifies shared upstream feeds or derivative inference chains and rejects artificial consensus.
+  * Generates explainable, auditable consensus assessments (`ConsensusAssessment`) with human-readable rationale and status (`CORROBORATED`, `CONTESTED`, `INCONCLUSIVE`, `UNVERIFIED`).
+* **Specialist Isolation & Context Filtering (`ContextFilter`)**:
+  * Least-privilege information sharing container (`CollaborationContext`) partitioned across 4 sensitivity tiers (`PUBLIC`, `INTERNAL`, `RESTRICTED`, `SENSITIVE`).
+  * Unauthorized context access is blocked with `UnauthorizedContextAccessError`.
+* **Workspace Persistence & Deterministic Recovery (`CollaborationPersistenceManager`)**:
+  * Atomic state serialization to `collaboration/state.json`.
+  * Automatic state restoration on core restart.
+* **Replay & Counterfactual Branch Quarantine**:
+  * Time-travel replay reconstructs collaboration history without re-invoking specialists or providers.
+  * Counterfactual branches represent simulation hypotheses and are strictly blocked from real provider dispatch or authoritative state pollution (`BranchExecutionBlockedError`).
+
+---
+
+## 15. Temporal Evidence & Knowledge Graph v0.1
+
+CyberClaw integrates a domain-neutral, provenance-preserving, temporal knowledge graph that sits between raw evidence production and investigation reasoning. The graph maintains an immutable history of entities, empirical evidence, analytical hypotheses, and governed relationships across investigative time.
+
+### Core Architectural Axioms
+1. **`ENTITY ≠ EVIDENCE`**: An entity (e.g. host, domain, account) is a conceptual subject; evidence is a captured artifact or observation about that subject.
+2. **`RELATIONSHIP ≠ EVIDENCE`**: A relationship is an asserted connection between nodes; evidence is the factual basis that supports or refutes that connection.
+3. **`OBSERVATION ≠ INFERENCE`**: Direct sensor readings and observations must never be conflated with derived inferences or hypotheses.
+4. **`INFERENCE ≠ FACT`**: Analytical conclusions retain lower epistemic confidence and carry mandatory premise lineage.
+5. **`CORRELATION ≠ CAUSATION`**: Statistical co-occurrence or temporal proximity does not establish a causal dependency.
+6. **`CURRENT STATE ≠ HISTORICAL STATE`**: Queries can inspect the graph as it currently exists or as it existed at any historical point in time or event sequence.
+7. **`GRAPH EDGE ≠ PROOF`**: Graph edges represent probabilistic or evidentiary links, not undeniable factual proof.
+8. **`GRAPH STRUCTURE ≠ AUTHORITY`**: The graph reflects knowledge state; authoritative case decisions reside in the Case Journal.
+9. **`DERIVED KNOWLEDGE MUST RETAIN LINEAGE`**: Any node or edge produced from upstream premises must maintain backward lineage to root evidence.
+10. **`REMOVING EVIDENCE MUST NOT SILENTLY ERASE HISTORY`**: Superseded or refuted evidence marks edges as revoked, superseded, or refuting without destroying historical records.
+11. **`AUTHORITATIVE CASE STATE REMAINS THE SOURCE OF CASE TRUTH`**: The graph materializes deterministically from authoritative case history.
+12. **`REPLAY MUST RECONSTRUCT THE GRAPH AS IT EXISTED AT THAT POINT IN TIME`**: Historical replay produces bit-for-bit identical cryptographic digests.
+13. **`BRANCH GRAPH STATE MUST NEVER LEAK INTO AUTHORITATIVE GRAPH STATE`**: Counterfactual branch nodes and edges (`is_counterfactual=True`) are isolated.
+14. **`SPECIALISTS MAY PROPOSE GRAPH CHANGES; CORE GOVERNANCE AUTHORIZES THEM`**: Specialist mutations flow through the governed mutation pipeline.
+15. **`NO GRAPH INFERENCE MAY BE TREATED AS AN OBSERVATION`**: Epistemic classifications are preserved without upward elevation.
+
+### Architectural Subsystems
+* **Domain-Neutral Node & Edge Ontology (`models.py`, `nodes.py`, `edges.py`)**:
+  * Generic `NodeType` taxonomy: `ENTITY`, `EVIDENCE`, `HYPOTHESIS`, `INVESTIGATION`, `SPECIALIST`, `CAPABILITY`, `CASE`, `SOURCE`, `OBSERVATION`, `ARTIFACT`, `REQUIREMENT`.
+  * Generic `RelationshipType` taxonomy: `ASSOCIATED_WITH`, `DERIVED_FROM`, `SUPPORTS`, `CONTRADICTS`, `CORROBORATES`, `DEPENDS_ON`, `OBSERVED_BY`, `GENERATED_BY`, `PART_OF`, `SAME_AS`, `RELATED_TO`.
+  * Deterministic SHA-256 integrity digest for all nodes and edges.
+* **Temporal Semantics & Contradictions (`temporal.py`)**:
+  * Temporal validity windows (`valid_from`, `valid_until`) with interval overlap and containment tests.
+  * Explicit conflict classification: `DIRECT_CONTRADICTION`, `TEMPORAL_SUPERSEDENCE`, `SOURCE_DISAGREEMENT`, `PROBABILISTIC_TENSION`.
+* **Lineage & Source Independence (`provenance.py`)**:
+  * Backward lineage tracing across multi-hop derivation chains to extract root evidence and source references.
+  * Source independence verification detecting shared upstream sources and preventing circular corroboration.
+* **Governed Mutations & Integrity (`mutations.py`, `graph.py`)**:
+  * `GraphMutationPipeline` evaluating schema validity, PolicyEngine authorization, and journal auditing before mutation application.
+  * Graph-level SHA-256 digest calculated deterministically independent of node/edge insertion order.
+* **Current vs. Historical Views (`queries.py`)**:
+  * `CurrentKnowledgeView` querying active elements at the current time horizon.
+  * `HistoricalKnowledgeView` filtering elements valid at specific historical timestamps or sequence points.
+* **Bounded Traversal & Explanation API (`traversal.py`, `queries.py`)**:
+  * BFS/DFS path traversal with depth bounds, node type filtering, and strict cycle protection.
+  * Structured explanations (`explain_node`, `explain_edge`, `explain_hypothesis_graph`) exposing supporting vs. refuting evidence, confidence, and source independence.
+* **Adaptive Planning & Consistency Engine (`consistency.py`, `queries.py`)**:
+  * Automated detection of `KnowledgeGap` records (unsupported hypotheses, uncorroborated inferences, conflicting findings, isolated entities).
+  * Knowledge consistency checks flagging cycles, dangling references, and unresolved contradictions.
+* **Workspace Persistence & Replay Determinism (`persistence.py`, `replay/engine.py`)**:
+  * Atomic serialization to `knowledge/graph.json` with hash verification on reload.
+  * Full replay reconstruction matching live graph digests exactly.
+
+---
+
+## 16. Running the Tests
 
 Install dependencies and run the test suite:
 

@@ -378,3 +378,79 @@ class ReplayEngine:
             is_valid=True,
             digest=recon_end.state_digest,
         )
+
+    @classmethod
+    def replay_knowledge_graph(
+        cls,
+        case_data: Union[CaseState, Investigation],
+        until_sequence: Optional[int] = None,
+        until_snapshot: Optional[Union[int, str]] = None,
+        until_timestamp: Optional[Any] = None,
+    ) -> Any:
+        """Deterministically reconstruct historical knowledge graph without executing providers, planners, or policies."""
+        import copy
+        from cyberclaw.knowledge.materialization import KnowledgeMaterializer
+        recon_state = cls.replay(
+            case_data,
+            until_sequence=until_sequence,
+            from_snapshot=until_snapshot,
+            until_snapshot=until_snapshot,
+        )
+
+        # Build lightweight investigation container holding strictly replayed state
+        from cyberclaw.investigation import Investigation
+        inv_wrapper = Investigation(
+            id=recon_state.investigation_id,
+            title=f"Replay Investigation {recon_state.investigation_id}",
+        )
+        inv_wrapper.hypotheses = copy.deepcopy(recon_state.hypotheses)
+        inv_wrapper.contradictions = copy.deepcopy(recon_state.contradictions)
+        for ev in recon_state.evidence:
+            inv_wrapper.evidence_store.add(ev)
+
+        graph = KnowledgeMaterializer.materialize_from_investigation(inv_wrapper)
+        return graph
+
+    @classmethod
+    def query_historical_graph(
+        cls,
+        case_data: Union[CaseState, Investigation],
+        timestamp: Any,
+        until_sequence: Optional[int] = None,
+    ) -> Any:
+        """Query historical point-in-time view of knowledge graph."""
+        graph = cls.replay_knowledge_graph(case_data, until_sequence=until_sequence)
+        return graph.get_historical_view_at_time(timestamp)
+
+    @classmethod
+    def compare_graph_states(
+        cls,
+        graph_a: Any,
+        graph_b: Any,
+    ) -> Dict[str, Any]:
+        """Factual, unranked comparison between two knowledge graph states."""
+        nodes_a = set(graph_a._nodes.keys())
+        nodes_b = set(graph_b._nodes.keys())
+        edges_a = set(graph_a._edges.keys())
+        edges_b = set(graph_b._edges.keys())
+
+        return {
+            "digest_a": graph_a.calculate_graph_digest(),
+            "digest_b": graph_b.calculate_graph_digest(),
+            "identical": graph_a.calculate_graph_digest() == graph_b.calculate_graph_digest(),
+            "nodes_only_in_a": sorted(nodes_a - nodes_b),
+            "nodes_only_in_b": sorted(nodes_b - nodes_a),
+            "nodes_shared": sorted(nodes_a & nodes_b),
+            "edges_only_in_a": sorted(edges_a - edges_b),
+            "edges_only_in_b": sorted(edges_b - edges_a),
+            "edges_shared": sorted(edges_a & edges_b),
+        }
+
+    @classmethod
+    def validate_graph_history(
+        cls,
+        graph: Any,
+        entries: List[JournalEntry],
+    ) -> bool:
+        """Verify that all nodes and edges in graph maintain cryptographic integrity."""
+        return graph.verify_graph_integrity()

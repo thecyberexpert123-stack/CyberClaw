@@ -121,6 +121,17 @@ class CyberClawCore:
         )
         self.runtime_scheduler = RuntimeScheduler(self.runtime_queue, self.runtime_executor)
 
+        # Initialize Multi-Specialist Collaboration Coordinator
+        from cyberclaw.collaboration.coordinator import CollaborationCoordinator
+        self.collaboration = CollaborationCoordinator(
+            specialist_registry=self.specialists,
+            capability_registry=self.capabilities,
+            policy_engine=self.policy_engine,
+            runtime_queue=self.runtime_queue,
+        )
+
+        self._knowledge_graphs: Dict[str, Any] = {}
+
     def _resolve_actor_role(self, actor: str) -> str:
         """Resolve an actor identifier to a recognized ActorRole value."""
         if actor == "core.system" or actor.startswith("system."):
@@ -285,7 +296,13 @@ class CyberClawCore:
             required_permission=PERM_INVESTIGATION_VIEW,
             scope=ActionScope.REVERSIBLE,
         )
-        return self._investigations.get(investigation_id)
+        inv = self._investigations.get(investigation_id)
+        if inv is not None:
+            return inv
+        for parent_inv in self._investigations.values():
+            if hasattr(parent_inv, "branches") and investigation_id in parent_inv.branches:
+                return parent_inv.branches[investigation_id]
+        return None
 
     def list_investigations(self, actor: str = "core.system") -> List[Investigation]:
         """List all investigations."""
@@ -1505,6 +1522,243 @@ class CyberClawCore:
             layout = self.workspace.get_investigation_workspace(investigation_id)
             base_dir = layout.root
         return RuntimePersistenceManager.load_state(self.runtime_queue, self.runtime_idempotency, base_dir)
+
+    # --------------------------------------------------------------------------
+    # Multi-Specialist Collaboration APIs
+    # --------------------------------------------------------------------------
+
+    def request_collaboration(
+        self,
+        investigation_id: str,
+        requesting_specialist: str,
+        objective: str,
+        target_specialist: Optional[str] = None,
+        information_requirement_id: Optional[str] = None,
+        input_evidence_ids: Optional[List[str]] = None,
+        input_entity_ids: Optional[List[str]] = None,
+        hypothesis_ids: Optional[List[str]] = None,
+        required_capabilities: Optional[List[str]] = None,
+        requested_permissions: Optional[List[str]] = None,
+        priority: int = 50,
+        sensitivity: Any = "INTERNAL",
+        action_scope: str = "reversible",
+        deadline: Optional[Any] = None,
+        timeout_seconds: Optional[float] = None,
+        dependencies: Optional[List[str]] = None,
+        is_counterfactual: bool = False,
+    ):
+        """Submit a structured collaboration request from one specialist to another."""
+        from cyberclaw.collaboration.models import ContextSensitivity
+        inv = self.get_investigation(investigation_id)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+
+        sens_enum = ContextSensitivity(sensitivity) if isinstance(sensitivity, str) else sensitivity
+        return self.collaboration.request_collaboration(
+            investigation=inv,
+            requesting_specialist=requesting_specialist,
+            objective=objective,
+            target_specialist=target_specialist,
+            information_requirement_id=information_requirement_id,
+            input_evidence_ids=input_evidence_ids,
+            input_entity_ids=input_entity_ids,
+            hypothesis_ids=hypothesis_ids,
+            required_capabilities=required_capabilities,
+            requested_permissions=requested_permissions,
+            priority=priority,
+            sensitivity=sens_enum,
+            action_scope=action_scope,
+            deadline=deadline,
+            timeout_seconds=timeout_seconds,
+            dependencies=dependencies,
+            is_counterfactual=is_counterfactual,
+        )
+
+    def validate_and_route_collaboration(
+        self,
+        investigation_id: str,
+        request_id: str,
+    ):
+        """Validate dependencies, route to an eligible specialist, and verify policy authorization."""
+        inv = self.get_investigation(investigation_id)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return self.collaboration.validate_and_route(request_id, inv, self.permissions)
+
+    def accept_collaboration_request(
+        self,
+        investigation_id: str,
+        request_id: str,
+        parameters: Optional[Dict[str, Any]] = None,
+    ):
+        """Target specialist accepts request, packages least-privilege context, and enqueues runtime task."""
+        inv = self.get_investigation(investigation_id)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        return self.collaboration.accept_and_enqueue(request_id, inv, parameters=parameters)
+
+    def process_collaboration_result(
+        self,
+        investigation_id: str,
+        request_id: str,
+        result: Any,
+    ):
+        """Process returned specialist result: normalize findings, discover conflicts, update consensus and case."""
+        inv = self.get_investigation(investigation_id)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        evs = self.collaboration.process_result(request_id, result, inv)
+        self._persist_case(inv)
+        self.persist_collaboration_state(investigation_id)
+        return evs
+
+    def resolve_specialist_conflict(
+        self,
+        investigation_id: str,
+        conflict_id: str,
+        resolution_evidence_id: str,
+        rationale: str,
+    ):
+        """Explicitly resolve a recorded specialist conflict using resolution evidence."""
+        inv = self.get_investigation(investigation_id)
+        if not inv:
+            raise KeyError(f"Investigation '{investigation_id}' not found.")
+        conflict = self.collaboration.conflict_manager.resolve_conflict(
+            conflict_id=conflict_id,
+            resolution_evidence_id=resolution_evidence_id,
+            rationale=rationale,
+        )
+        inv.case_manager.journal.append_entry(
+            entry_type=JournalEntryType.SPECIALIST_CONFLICT_RESOLVED,
+            summary=f"Specialist conflict '{conflict_id}' resolved: {rationale}",
+            reference_id=conflict_id,
+            details={"resolution_evidence_id": resolution_evidence_id, "rationale": rationale},
+        )
+        self._persist_case(inv)
+        return conflict
+
+    def persist_collaboration_state(self, investigation_id: Optional[str] = None) -> None:
+        """Atomically persist collaboration requests and conflicts."""
+        from cyberclaw.collaboration.persistence import CollaborationPersistenceManager
+        base_dir = self.workspace.base_path
+        if investigation_id:
+            layout = self.workspace.get_investigation_workspace(investigation_id)
+            base_dir = layout.root
+        CollaborationPersistenceManager.persist_state(self.collaboration, base_dir)
+
+    def load_collaboration_state(self, investigation_id: Optional[str] = None) -> bool:
+        """Load persisted collaboration requests and conflicts."""
+        from cyberclaw.collaboration.persistence import CollaborationPersistenceManager
+        base_dir = self.workspace.base_path
+        if investigation_id:
+            layout = self.workspace.get_investigation_workspace(investigation_id)
+            base_dir = layout.root
+        return CollaborationPersistenceManager.load_state(self.collaboration, base_dir)
+
+    # --------------------------------------------------------------------------
+    # Temporal Knowledge Graph APIs
+    # --------------------------------------------------------------------------
+
+    def get_knowledge_graph(self, investigation_id: str) -> Any:
+        """Retrieve or initialize the in-memory TemporalKnowledgeGraph for an investigation."""
+        inv = self.get_investigation(investigation_id)
+        if investigation_id not in self._knowledge_graphs:
+            from cyberclaw.knowledge.graph import TemporalKnowledgeGraph
+            self._knowledge_graphs[investigation_id] = TemporalKnowledgeGraph(
+                investigation_id=investigation_id,
+                case_id=getattr(inv, "case_id", ""),
+                is_counterfactual=getattr(inv, "is_counterfactual", False),
+                branch_id=getattr(inv, "branch_id", None),
+            )
+        return self._knowledge_graphs[investigation_id]
+
+    def materialize_knowledge_graph(self, investigation_id: str) -> Any:
+        """Deterministically materialize the knowledge graph from authoritative Case State and Evidence."""
+        from cyberclaw.knowledge.graph import TemporalKnowledgeGraph
+        from cyberclaw.knowledge.materialization import KnowledgeMaterializer
+        inv = self.get_investigation(investigation_id)
+        fresh_graph = TemporalKnowledgeGraph(
+            investigation_id=investigation_id,
+            case_id=getattr(inv, "case_id", ""),
+            is_counterfactual=getattr(inv, "is_counterfactual", False),
+            branch_id=getattr(inv, "branch_id", None),
+        )
+        materialized = KnowledgeMaterializer.materialize_from_investigation(inv, target_graph=fresh_graph)
+        self._knowledge_graphs[investigation_id] = materialized
+        self.persist_knowledge_graph(investigation_id)
+        return materialized
+
+    def mutate_knowledge_graph(self, investigation_id: str, request: Any) -> Any:
+        """Apply a governed mutation to the knowledge graph through PolicyEngine and CaseJournal."""
+        from cyberclaw.knowledge.mutations import GraphMutationPipeline
+        inv = self.get_investigation(investigation_id)
+        graph = self.get_knowledge_graph(investigation_id)
+        result = GraphMutationPipeline.apply_mutation(
+            graph=graph,
+            request=request,
+            policy_engine=self.policy_engine,
+            investigation=inv,
+        )
+        if result.is_successful:
+            self.persist_knowledge_graph(investigation_id)
+        return result
+
+    def explain_knowledge_node(self, investigation_id: str, node_id: str) -> Any:
+        """Produce an audit-ready, provenance-preserving explanation of a knowledge node."""
+        from cyberclaw.knowledge.queries import KnowledgeQueryEngine
+        inv = self.get_investigation(investigation_id)
+        graph = self.get_knowledge_graph(investigation_id)
+        evidence_items = inv.evidence_store.list_all() if hasattr(inv, "evidence_store") else []
+        return KnowledgeQueryEngine.explain_node(graph, node_id, evidence_items=evidence_items)
+
+    def explain_knowledge_edge(self, investigation_id: str, edge_id: str) -> Any:
+        """Produce an audit-ready, provenance-preserving explanation of a knowledge edge."""
+        from cyberclaw.knowledge.queries import KnowledgeQueryEngine
+        inv = self.get_investigation(investigation_id)
+        graph = self.get_knowledge_graph(investigation_id)
+        evidence_items = inv.evidence_store.list_all() if hasattr(inv, "evidence_store") else []
+        return KnowledgeQueryEngine.explain_edge(graph, edge_id, evidence_items=evidence_items)
+
+    def find_knowledge_gaps(self, investigation_id: str) -> List[Any]:
+        """Detect uncertainties, uncorroborated hypotheses, and active contradictions in the knowledge graph."""
+        from cyberclaw.knowledge.queries import KnowledgeQueryEngine
+        graph = self.get_knowledge_graph(investigation_id)
+        return KnowledgeQueryEngine.find_knowledge_gaps(graph)
+
+    def check_knowledge_consistency(self, investigation_id: str) -> List[Any]:
+        """Perform comprehensive consistency verification on the investigation's knowledge graph."""
+        from cyberclaw.knowledge.consistency import KnowledgeConsistencyEngine
+        inv = self.get_investigation(investigation_id)
+        graph = self.get_knowledge_graph(investigation_id)
+        ev_store = getattr(inv, "evidence_store", None)
+        return KnowledgeConsistencyEngine.check_consistency(graph, evidence_store=ev_store)
+
+    def persist_knowledge_graph(self, investigation_id: str) -> Any:
+        """Atomically persist knowledge graph state to workspace layout."""
+        from cyberclaw.knowledge.persistence import KnowledgePersistenceManager
+        graph = self.get_knowledge_graph(investigation_id)
+        layout = self.workspace.get_investigation_workspace(investigation_id)
+        return KnowledgePersistenceManager.save_graph(graph, layout.root)
+
+    def load_knowledge_graph(
+        self,
+        investigation_id: str,
+        is_counterfactual: bool = False,
+        branch_id: Optional[str] = None,
+    ) -> Any:
+        """Restore and verify knowledge graph state from workspace layout."""
+        from cyberclaw.knowledge.persistence import KnowledgePersistenceManager
+        layout = self.workspace.get_investigation_workspace(investigation_id)
+        graph = KnowledgePersistenceManager.load_graph(
+            investigation_id=investigation_id,
+            workspace_path=layout.root,
+            is_counterfactual=is_counterfactual,
+            branch_id=branch_id,
+        )
+        if graph:
+            self._knowledge_graphs[investigation_id] = graph
+        return graph
+
 
 
 

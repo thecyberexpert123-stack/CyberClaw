@@ -765,3 +765,63 @@ class BranchEngine:
         else:
             experience_store._records[rec.id] = rec
         return rec
+
+    @classmethod
+    def replay_branch_graph(
+        cls,
+        branch: InvestigationBranch,
+    ) -> Any:
+        """Deterministically reconstruct counterfactual branch knowledge graph from branch state."""
+        import copy
+        from cyberclaw.knowledge.graph import TemporalKnowledgeGraph
+        from cyberclaw.knowledge.materialization import KnowledgeMaterializer
+        from cyberclaw.investigation import Investigation
+
+        inv_wrapper = Investigation(
+            title=f"Branch Graph {branch.branch_id}",
+            investigation_id=branch.branch_id,
+        )
+        inv_wrapper.hypotheses = copy.deepcopy(branch.hypotheses)
+        for ev in branch.simulated_evidence:
+            inv_wrapper.add_evidence(ev)
+
+        target_graph = TemporalKnowledgeGraph(
+            investigation_id=branch.branch_id,
+            case_id=branch.investigation_id,
+            is_counterfactual=True,
+            branch_id=branch.branch_id,
+        )
+        return KnowledgeMaterializer.materialize_from_investigation(inv_wrapper, target_graph=target_graph)
+
+    @classmethod
+    def compare_branch_graphs(
+        cls,
+        graph_a: Any,
+        graph_b: Any,
+    ) -> Dict[str, Any]:
+        """Factual, unranked comparison between two branch knowledge graphs."""
+        nodes_a = set(graph_a._nodes.keys())
+        nodes_b = set(graph_b._nodes.keys())
+        edges_a = set(graph_a._edges.keys())
+        edges_b = set(graph_b._edges.keys())
+
+        return {
+            "digest_a": graph_a.calculate_graph_digest(),
+            "digest_b": graph_b.calculate_graph_digest(),
+            "identical": graph_a.calculate_graph_digest() == graph_b.calculate_graph_digest(),
+            "nodes_only_in_a": sorted(nodes_a - nodes_b),
+            "nodes_only_in_b": sorted(nodes_b - nodes_a),
+            "nodes_shared": sorted(nodes_a & nodes_b),
+            "edges_only_in_a": sorted(edges_a - edges_b),
+            "edges_only_in_b": sorted(edges_b - edges_a),
+            "edges_shared": sorted(edges_a & edges_b),
+        }
+
+    @classmethod
+    def compare_graph_to_snapshot(
+        cls,
+        branch_graph: Any,
+        snapshot_graph: Any,
+    ) -> Dict[str, Any]:
+        """Factual, unranked comparison between branch graph and source snapshot graph."""
+        return cls.compare_branch_graphs(branch_graph, snapshot_graph)

@@ -6,6 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Temporal Evidence & Knowledge Graph v0.1
+- **`cyberclaw/knowledge/models.py`**: Immutable domain-neutral models and enums including `NodeType` (11 generic node types), `RelationshipType` (11 generic relationship types), `EdgeStatus`, `KnowledgeGap`, `KnowledgeExplanation`, and `ConsistencyIssue`.
+- **`cyberclaw/knowledge/nodes.py`**: Deterministic `KnowledgeNode` container with temporal validity boundaries (`valid_from`, `valid_until`), provenance references, source references, counterfactual tagging, and deterministic SHA-256 node integrity digests.
+- **`cyberclaw/knowledge/edges.py`**: Directed, typed `KnowledgeEdge` capturing relationships between nodes with confidence scores (0.0 to 1.0), epistemic classification (`OBSERVATION`, `INFERENCE`, `HYPOTHESIS`, `CONTRADICTION`), supporting/refuting evidence references, and deterministic SHA-256 edge integrity digests.
+- **`cyberclaw/knowledge/temporal.py`**: `TemporalInterval` semantics for computing interval overlap, containment, and validity at arbitrary historical timestamps; conflict classifier distinguishing `DIRECT_CONTRADICTION`, `TEMPORAL_SUPERSEDENCE`, `SOURCE_DISAGREEMENT`, and `PROBABILISTIC_TENSION`.
+- **`cyberclaw/knowledge/provenance.py`**: Lineage and derivation engine providing recursive backward lineage tracing to extract root evidence and source references, and source independence verification rejecting circular or shared-source corroboration.
+- **`cyberclaw/knowledge/graph.py`**: Multi-indexed `TemporalKnowledgeGraph` managing nodes, edges, adjacency indices, temporal lookup, branch isolation, and order-independent cryptographic graph digest computation.
+- **`cyberclaw/knowledge/queries.py`**: Dual-view abstraction (`CurrentKnowledgeView` and `HistoricalKnowledgeView`), query engine, planning gap discovery (`find_knowledge_gaps`), and explanation generation (`explain_node`, `explain_edge`, `explain_hypothesis_graph`).
+- **`cyberclaw/knowledge/traversal.py`**: `GraphTraversalEngine` providing BFS/DFS path traversal with depth limits, node/edge type constraints, and strict cycle protection.
+- **`cyberclaw/knowledge/mutations.py`**: Governed `GraphMutationPipeline` enforcing 3-phase mutation lifecycle (`Validation -> PolicyEngine Authorization -> CaseJournal Auditing -> Execution`) for additions, edge assertions, and edge revocations.
+- **`cyberclaw/knowledge/materialization.py`**: Deterministic `KnowledgeMaterializer` synthesizing complete temporal knowledge graphs from authoritative `CaseState` and `Investigation` stores without invoking specialists or providers.
+- **`cyberclaw/knowledge/consistency.py`**: `KnowledgeConsistencyEngine` verifying graph integrity, detecting contradictions, cycle violations, dangling references, and uncorroborated inferences.
+- **`cyberclaw/knowledge/persistence.py`**: `KnowledgePersistenceManager` providing atomic workspace serialization in `knowledge/graph.json` with cryptographic digest verification on reload.
+- **`cyberclaw/knowledge/errors.py`**: Structured exception taxonomy (`KnowledgeGraphError`, `NodeNotFoundError`, `EdgeNotFoundError`, `CyclicDependencyError`, `TemporalConsistencyError`, `GraphMutationValidationError`, `GraphAuthorizationDeniedError`, `GraphTamperDetectedError`, `BranchIsolationError`, `KnowledgePersistenceError`).
+- **Core Integration**:
+  - `CyberClawCore.materialize_knowledge_graph(...)`: Materializes deterministic graph from case state.
+  - `CyberClawCore.propose_graph_mutation(...)`: Processes governed graph mutations through validation and policy.
+  - `CyberClawCore.query_current_graph(...)` & `query_historical_graph(...)`: Current vs. historical time-slice queries.
+  - `CyberClawCore.explain_graph_hypothesis(...)`: Generates explainability report for hypotheses.
+  - `CyberClawCore.discover_knowledge_gaps(...)`: Surfaces knowledge gaps for adaptive planning.
+  - `CyberClawCore.persist_knowledge_graph(...)` & `load_knowledge_graph(...)`: Atomic persistence and reload verification.
+- **Replay & Branch Integration**:
+  - `ReplayEngine.replay_knowledge_graph(...)`: Reconstructs historical graph states without provider or planner execution.
+  - `ReplayEngine.compare_graph_states(...)`: Computes state diffs across live and replayed knowledge graphs.
+  - Strict branch isolation quarantine ensuring branch mutations do not contaminate authoritative graphs.
+- **Comprehensive Testing**:
+  - Added 44 deterministic tests across 5 new test files:
+    - `tests/test_knowledge_models_and_integrity.py` (8 tests)
+    - `tests/test_knowledge_temporal_and_provenance.py` (8 tests)
+    - `tests/test_knowledge_traversal_and_queries.py` (9 tests)
+    - `tests/test_knowledge_governance_and_consistency.py` (10 tests)
+    - `tests/test_knowledge_persistence_replay_e2e.py` (9 tests, including complete Section 28 E2E scenario)
+  - Total passing tests increased from 297 to 341 with zero regressions across all 65 test suites.
+
+### Added - Multi-Specialist Collaboration & Evidence Consensus v0.1
+- **`cyberclaw/collaboration/models.py`**: Immutable, versioned data models including `CollaborationRequest`, `CollaborationResult`, `CollaborationContext`, `SpecialistConflict`, `ConsensusAssessment`, `CollaborationDependency`, `CollaborationStatus`, `ConflictStatus`, `ConsensusStatus`, `ContextSensitivity`, `DependencyType`, `DependencyRelation`, and `FindingNature`.
+- **`cyberclaw/collaboration/protocol.py`**: Deterministic `CollaborationLifecycleDFA` defining formal state machine (`PROPOSED -> VALIDATING -> AUTHORIZED -> ROUTED -> ACCEPTED -> IN_PROGRESS -> RESULT_RECEIVED -> EVALUATED -> COMPLETED` and alternate paths `REJECTED`, `DEFERRED`, `CANCELLED`, `FAILED`, `EXPIRED`, `BLOCKED`) and least-privilege `ContextFilter` enforcing 4 clearance tiers (`PUBLIC`, `INTERNAL`, `RESTRICTED`, `SENSITIVE`).
+- **`cyberclaw/collaboration/dependencies.py`**: `CollaborationDependencyGraph` modeling explicit dependency DAG relationships (`depends_on`, `blocks`, `unblocks`, `derived_from`, `corroborates`, `contradicts`), DFS multi-hop cycle detection, and hard vs. soft dependency readiness gating.
+- **`cyberclaw/collaboration/routing.py`**: Domain-neutral `CollaborationRouter` evaluating specialist health (`HEALTHY`, `DEGRADED`, `UNHEALTHY`), workload capacity, capability registration, and requirement constraints with transparent candidate scoring.
+- **`cyberclaw/collaboration/evidence.py`**: Structured `EvidenceHandoffNormalizer` classifying specialist findings into 6 distinct epistemic categories (`OBSERVATION`, `INFERENCE`, `CORRELATION`, `HYPOTHESIS`, `NEGATIVE_FINDING`, `FAILURE`) while preserving complete derivation and provenance lineage (`derived_from_evidence_ids`, `authorization_decision_id`, `capability_version`).
+- **`cyberclaw/collaboration/conflicts.py`**: `ConflictDetector` and `ConflictManager` identifying contradictory findings across specialists, maintaining explicit `SpecialistConflict` records without overwriting findings, and tracking conflict resolution lifecycle (`OPEN`, `UNDER_REVIEW`, `CORROBORATING`, `RESOLVED`, `PERSISTENT`, `ABANDONED`).
+- **`cyberclaw/collaboration/consensus.py`**: Explainable `ConsensusEngine` computing confidence based on source independence, corroboration, refutation, and uncertainty; rejects artificial consensus from shared upstream sources or derivative inferences.
+- **`cyberclaw/collaboration/coordinator.py`**: `CollaborationCoordinator` integrating Multi-Specialist Collaboration with Runtime, PolicyEngine, Case Journal, and Evidence Stores.
+- **`cyberclaw/collaboration/persistence.py`**: `CollaborationPersistenceManager` providing atomic workspace serialization in `collaboration/state.json`.
+- **`cyberclaw/collaboration/errors.py`**: Structured exception hierarchy (`CollaborationError`, `CollaborationStateTransitionError`, `CollaborationValidationError`, `CollaborationAuthorizationError`, `SpecialistUnavailableError`, `DependencyUnresolvedError`, `DependencyCycleError`, `CollaborationTimeoutError`, `EvidenceNormalizationError`, `ConflictProcessingError`, `ConsensusEvaluationError`, `UnauthorizedContextAccessError`, `CollaborationPersistenceError`).
+- **Core Integration**:
+  - `CyberClawCore.request_collaboration(...)`: Submits structured collaboration requests across specialists.
+  - `CyberClawCore.validate_and_route_collaboration(...)`: Validates dependencies, policy authorization, and capability routing.
+  - `CyberClawCore.accept_collaboration_request(...)`: Enqueues governed durable runtime tasks.
+  - `CyberClawCore.process_collaboration_result(...)`: Normalizes findings, detects conflicts, and synthesizes consensus.
+  - `CyberClawCore.resolve_specialist_conflict(...)`: Formally resolves specialist conflicts with authoritative evidence and rationale.
+  - `CyberClawCore.persist_collaboration_state(...)` & `load_collaboration_state(...)`: Atomic persistence and restore.
+- **Case Journal**:
+  - Added collaboration journal entries: `COLLABORATION_REQUESTED`, `COLLABORATION_AUTHORIZED`, `COLLABORATION_ACCEPTED`, `COLLABORATION_RESULT_RECEIVED`, `SPECIALIST_CONFLICT_DETECTED`, `COLLABORATION_COMPLETED`.
+- **Comprehensive Testing**:
+  - Added 36 unit and integration tests across 5 new test files:
+    - `tests/test_collaboration_models_and_lifecycle.py` (9 tests)
+    - `tests/test_collaboration_dependencies_and_routing.py` (8 tests)
+    - `tests/test_collaboration_conflicts_and_consensus.py` (8 tests)
+    - `tests/test_collaboration_runtime_and_governance.py` (8 tests)
+    - `tests/test_collaboration_integration_and_e2e.py` (3 tests, including complete 31-step Section 36 E2E scenario)
+  - Total passing tests increased from 261 to 297 with zero regressions across all 60 test suites.
+
 ### Added - Durable Event-Driven Investigation Runtime v0.1
 - **`cyberclaw/runtime/models.py`**: Immutable, versioned data models including `RuntimeEvent`, `RuntimeTask`, `TaskStatus`, `TaskPriority`, `CancellationStatus`, `ExecutionState`, `RetryPolicy`, `RuntimeMetrics`, and `RuntimeObservabilityReport`.
 - **`cyberclaw/runtime/events.py`**: Explicit event typing (`RuntimeEventType` with 23 operational lifecycle event types), monotonic per-investigation `EventSequenceTracker` rejecting regressions and duplicates, and `EventFactory` maintaining causation and correlation graphs.

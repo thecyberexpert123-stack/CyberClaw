@@ -27,6 +27,13 @@ class Specialist(BaseModel):
     permissions: List[str] = Field(
         default_factory=list, description="Explicit permissions granted to this specialist"
     )
+    supported_information_types: List[str] = Field(
+        default_factory=list, description="Information types supported by this specialist"
+    )
+    capacity: int = Field(default=10, description="Concurrent task processing capacity")
+    active_workload: int = Field(default=0, description="Current assigned tasks")
+    max_sensitivity_level: str = Field(default="SENSITIVE", description="Maximum data sensitivity tier specialist is cleared to handle")
+    collaboration_contract: Dict[str, Any] = Field(default_factory=dict, description="Declarative collaboration agreements")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     def get_health(self) -> SpecialistHealth:

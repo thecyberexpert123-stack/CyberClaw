@@ -106,13 +106,14 @@ class RuntimeScheduler:
             seq_tracker = self._get_seq_tracker(inv_id)
 
             # Record Task Claimed Event in case journal
-            seq = seq_tracker.next_sequence()
-            investigation.case_manager.journal.append_entry(
-                entry_type=JournalEntryType.TASK_CLAIMED,
-                summary=f"Runtime task '{task.task_id}' claimed by {self.worker_id} for capability '{task.capability_id}'",
-                reference_id=task.task_id,
-                details={"sequence": seq, "capability_id": task.capability_id, "priority": int(task.priority)},
-            )
+            if hasattr(investigation, "case_manager") and investigation.case_manager is not None:
+                seq = seq_tracker.next_sequence()
+                investigation.case_manager.journal.append_entry(
+                    entry_type=JournalEntryType.TASK_CLAIMED,
+                    summary=f"Runtime task '{task.task_id}' claimed by {self.worker_id} for capability '{task.capability_id}'",
+                    reference_id=task.task_id,
+                    details={"sequence": seq, "capability_id": task.capability_id, "priority": int(task.priority)},
+                )
 
             try:
                 completed_task = self.executor.execute_task(

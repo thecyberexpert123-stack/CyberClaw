@@ -2,6 +2,40 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Temporal Evidence & Knowledge Graph v0.1
+
+### Lesson 21: Ontological Disaggregation of Knowledge: Entity ≠ Evidence ≠ Inference
+- **Observation**: Graph systems often collapse entities, empirical findings, and analytical assertions into generic nodes with undirected edges or uniform weightings.
+- **Consequence**: An inference (e.g., "host is infected with malware") is treated as equivalent in certainty to an empirical observation (e.g., "DNS query logged to domain X"), causing automated planners to treat unverified hypotheses as established ground truth.
+- **Resolution**: Enforced strict architectural axioms: `ENTITY ≠ EVIDENCE`, `RELATIONSHIP ≠ EVIDENCE`, `OBSERVATION ≠ INFERENCE`, and `INFERENCE ≠ FACT`. The knowledge graph categorizes nodes into distinct, typed ontological roles (`ENTITY`, `EVIDENCE`, `HYPOTHESIS`, `OBSERVATION`, etc.) and requires all edges to carry an explicit `epistemic_nature` and confidence rating. Inferences require explicit supporting evidence linkages and cannot be elevated into observations without new empirical data collection.
+
+### Lesson 22: Temporal Validity Windows and the Principle of Contradiction Preservation
+- **Observation**: Traditional graph databases treat conflicting updates as overwrite operations or merge conflicts, erasing historical facts when an indicator changes (e.g., an IP reassignment or certificate renewal).
+- **Consequence**: Reconstructing what the investigation knew at sequence step $N$ becomes impossible because superseded states were overwritten, destroying auditability and time-travel replay.
+- **Resolution**: Implemented bi-temporal intervals (`valid_from`, `valid_until`) across all nodes and edges alongside non-destructive contradiction edges (`RelationshipType.CONTRADICTS`). Conflicting findings do not mutate or delete existing edges; instead, an explicit contradiction record is introduced with competing evidence references. Historical queries evaluate validity intervals as of that point in time, enabling both the past state and current dispute to be inspected independently.
+
+### Lesson 23: Cryptographic State Determinism and Journal Replay Sourcing
+- **Observation**: Knowledge graphs constructed incrementally across disparate specialist turns can suffer from non-deterministic hash digests due to dictionary ordering, floating-point timestamp drift, or container identity mismatches.
+- **Consequence**: Live graphs and replayed graphs generated from the same underlying case history diverge cryptographically, failing deterministic verification during case closeout or peer review.
+- **Resolution**: Implemented canonical, sorted JSON stringification for node, edge, and whole-graph SHA-256 digests. Sourced investigation container attributes strictly from replayed state (matching `investigation.id`) and ensured that journal events or snapshot state capture all contradictions and evidence uniformly, achieving identical bit-for-bit digest parity between live materialization and replay reconstruction.
+
+## Milestone: Multi-Specialist Collaboration & Evidence Consensus v0.1
+
+### Lesson 18: Disagreement Preservation Over Winner-Takes-All Overwriting
+- **Observation**: Autonomous agent systems often handle conflicting findings between specialist agents by letting the last writer win, choosing the agent with higher static rank, or treating contradiction as a fatal exception.
+- **Consequence**: Critical signals (e.g. an endpoint reporting active C2 while another reports a legitimate sinkhole) are lost, resulting in misleading investigations and unexplainable conclusions.
+- **Resolution**: Enforced strict collaboration axioms: `DISAGREEMENT ≠ FAILURE` and `SPECIALIST AUTONOMY ≠ SPECIALIST AUTHORITY`. Introduced `SpecialistConflict` records and a formal conflict lifecycle (`OPEN -> UNDER_REVIEW -> CORROBORATING -> RESOLVED`). Competing claims are both retained in the immutable Case Journal, and consensus status defaults to `CONTESTED` until explicit, verifiable resolution evidence is introduced.
+
+### Lesson 19: Source Independence and Rejection of Artificial Consensus
+- **Observation**: Multiple agents querying the same upstream data provider or performing derivative inferences on each other's outputs are often counted as "multiple independent corroborations".
+- **Consequence**: Artificial consensus emerges where one unverified upstream record is echoed across multiple specialists, falsely inflating hypothesis confidence.
+- **Resolution**: Enforced strict source relationship tracking in `ConsensusEngine`. Evidence items sharing identical upstream provider identifiers, marked with `same_source_as`, or formed through derivative inference chains are clustered into a single source dependency group. Only genuinely distinct empirical observations from independent collection methods contribute to corroborated consensus.
+
+### Lesson 20: Epistemic Nature Distinction (Observation vs. Inference)
+- **Observation**: Systems routinely flatten deductive conclusions, hypotheses, and empirical probe measurements into generic "evidence" or "findings".
+- **Consequence**: Deductive inferences get treated as ground truth facts, causing subsequent planning loops to compound unproven assumptions.
+- **Resolution**: Implemented `EvidenceHandoffNormalizer` categorizing findings into 6 explicit epistemic natures: `OBSERVATION`, `INFERENCE`, `CORRELATION`, `HYPOTHESIS`, `NEGATIVE_FINDING`, and `FAILURE`. Inferences receive explicit confidence discounting (weighted at 0.8 relative to empirical observations) and retain upstream premise lineage (`derived_from_evidence_ids`), preventing unverified leaps from masquerading as factual observations.
+
 ## Milestone: Durable Event-Driven Investigation Runtime v0.1
 
 ### Lesson 15: Ontological Separation of Event, Queue, Authorization, and Execution
