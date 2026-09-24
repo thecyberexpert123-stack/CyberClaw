@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Cross-Case Experience & Investigation Strategy Learning v0.1
+- **`cyberclaw/learning/`**: Domain-neutral learning package. Experience is extracted from authoritative history, normalized with source lineage, clustered by source family, and grouped by exact versioned signatures. Patterns do not become strategies, strategies do not execute, and the learning engine cannot approve itself.
+- **Experience and provenance**: `InvestigationExperience` retains journal, evidence, requirement, hypothesis, contradiction, execution, and authorization references. Missing knowledge-graph history is recorded as absent rather than invented. Extraction does not append to the case journal.
+- **Pattern detection**: `signature_equality_v0.1` detects repeated success, failure, contradiction resolution, requirement sequence, collaboration, capability sequence, evidence yield, planning adaptation, recovery, and stopping patterns. Confidence is a explained qualitative band, not an objective score.
+- **Source independence**: declared templates/feeds/experiments and shared upstream sources collapse into one source family. A single case or a single family cannot become global knowledge. The floor of 2 independent cases and 2 families is architectural and cannot be lowered by threshold policy.
+- **Strategies**: immutable, versioned structured intents with explicit applicability, required capabilities, required permissions, known failures, and a deterministic lifecycle (`PROPOSED` through `AVAILABLE`, plus `REJECTED`, `DISABLED`, `QUARANTINED`). Executable payloads are rejected.
+- **Simulation and evaluation**: counterfactual simulation uses historical experiences and branches without provider execution, case mutation, capability grants, or live policy-store writes. Evaluation reports independent dimensions and trade-offs and does not declare a winner. Regression detection recommends review without deleting history.
+- **Governance and planner integration**: external `StrategyApprovalDecision`, isolated PolicyEngine precheck before publication, and planner candidate queries that return non-executable data. Runtime remains the only execution substrate.
+- **Replay, branching, persistence, and knowledge projection**: ledger replay reconstructs historical strategy and pattern versions without re-running today's detector. Branch results stay quarantined. `learning/registry.json` is atomic and digest-verified. Learned relations are projected onto a separate learning graph.
+- **Tests**: 46 new deterministic tests, including the mandatory cross-case E2E scenario. Full suite is 387 passed.
+
 ### Added - Temporal Evidence & Knowledge Graph v0.1
 - **`cyberclaw/knowledge/models.py`**: Immutable domain-neutral models and enums including `NodeType` (11 generic node types), `RelationshipType` (11 generic relationship types), `EdgeStatus`, `KnowledgeGap`, `KnowledgeExplanation`, and `ConsistencyIssue`.
 - **`cyberclaw/knowledge/nodes.py`**: Deterministic `KnowledgeNode` container with temporal validity boundaries (`valid_from`, `valid_until`), provenance references, source references, counterfactual tagging, and deterministic SHA-256 node integrity digests.

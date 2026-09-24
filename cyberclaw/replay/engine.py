@@ -454,3 +454,41 @@ class ReplayEngine:
     ) -> bool:
         """Verify that all nodes and edges in graph maintain cryptographic integrity."""
         return graph.verify_graph_integrity()
+
+    @classmethod
+    def replay_learning_state(
+        cls,
+        events: List[Any],
+        until_sequence: Optional[int] = None,
+    ) -> Any:
+        """Reconstruct historical learning state from recorded events only.
+
+        Does not rediscover patterns, reevaluate strategies, apply today's
+        thresholds, consult today's policy, or execute anything.
+        """
+        from cyberclaw.learning.registry import LearningReplay
+
+        return LearningReplay.replay_learning_state(events, until_sequence=until_sequence)
+
+    @classmethod
+    def get_strategy_history(cls, events: List[Any], strategy_id: str) -> List[Any]:
+        from cyberclaw.learning.registry import LearningReplay
+
+        return LearningReplay.get_strategy_history(events, strategy_id)
+
+    @classmethod
+    def get_pattern_history(cls, events: List[Any], pattern_id: str) -> List[Any]:
+        from cyberclaw.learning.registry import LearningReplay
+
+        return LearningReplay.get_pattern_history(events, pattern_id)
+
+    @classmethod
+    def explain_strategy_origin(
+        cls,
+        events: List[Any],
+        strategy_id: str,
+        version: Optional[str] = None,
+    ) -> Any:
+        from cyberclaw.learning.registry import LearningReplay
+
+        return LearningReplay.explain_strategy_origin(events, strategy_id, version=version)

@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Cross-Case Experience & Investigation Strategy Learning v0.1
+
+### Lesson 24: Experience Is a Reference, Not a Second Source of Truth
+- **Observation**: Learning systems often copy investigation narratives into a new store and then treat that copy as what happened.
+- **Consequence**: Missing fields get filled in, case journals drift from the learned record, and replay can no longer say which authoritative event supported a pattern.
+- **Resolution**: Extraction is read-only. Every experience keeps authoritative record IDs. Fields that were not in history are listed as absent. Learning failures are written only to the learning ledger. Case journals, policies, and capability trust are not mutated by extraction or by a failed ingest.
+
+### Lesson 25: Sample Count Is Not Independence
+- **Observation**: Repeated runs of the same template, feed, or upstream source look like a large evidence base if each investigation ID is counted as independent.
+- **Consequence**: A copied workflow can promote a strategy into global authority after one real observation.
+- **Resolution**: Source-family clustering unions declared lineage and shared upstream sources, using the same independence idea as knowledge provenance. Pattern reports separate sample count from independent case count and independent source-family count. An architectural floor of two cases and two families cannot be lowered by threshold policy. One case remains case-local.
+
+### Lesson 26: A Strategy That Can Run Itself Is No Longer a Proposal
+- **Observation**: It is tempting to store the next workflow as code, or to let a high historical score skip review and call providers.
+- **Consequence**: Learning bypasses PolicyEngine, capability governance, and Runtime, and a counterfactual simulation becomes indistinguishable from history.
+- **Resolution**: Strategies are frozen structured intents. Executable fragments are rejected. Lifecycle cannot jump from `PROPOSED` to `AVAILABLE`. Simulation is labeled counterfactual, uses an isolated policy snapshot, and quarantines branch results. Approval must come from an external actor who is not the proposer and not the learning engine. The planner receives candidates; Runtime executes authorized actions. Regression can recommend deprecation, but historical strategy versions are not rewritten.
+
 ## Milestone: Temporal Evidence & Knowledge Graph v0.1
 
 ### Lesson 21: Ontological Disaggregation of Knowledge: Entity ≠ Evidence ≠ Inference

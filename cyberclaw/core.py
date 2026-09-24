@@ -132,6 +132,11 @@ class CyberClawCore:
 
         self._knowledge_graphs: Dict[str, Any] = {}
 
+        from cyberclaw.learning.proposals import LearningService
+        from cyberclaw.learning.registry import LearningRegistry
+        self.learning = LearningRegistry()
+        self.learning_service = LearningService(self.learning)
+
     def _resolve_actor_role(self, actor: str) -> str:
         """Resolve an actor identifier to a recognized ActorRole value."""
         if actor == "core.system" or actor.startswith("system."):
@@ -1758,6 +1763,166 @@ class CyberClawCore:
         if graph:
             self._knowledge_graphs[investigation_id] = graph
         return graph
+
+
+
+
+
+
+
+    # --------------------------------------------------------------------------
+    # Cross-Case Experience & Strategy Learning APIs
+    # --------------------------------------------------------------------------
+
+    def ingest_investigation_experience(self, investigation_id: str, actor: str = "learning.engine") -> Any:
+        """Extract, normalize, and detect patterns. Does not approve or execute."""
+        inv = self.get_investigation(investigation_id, actor="core.system")
+        return self.learning_service.ingest(inv, actor=actor)
+
+    def propose_learned_strategy(self, pattern_id: str, proposer_id: str, pattern_version: Optional[str] = None) -> Any:
+        """Propose a strategy from a validated pattern. Does not approve it."""
+        return self.learning_service.propose(pattern_id, proposer_id, pattern_version=pattern_version)
+
+    def simulate_learned_strategy(
+        self,
+        strategy_id: str,
+        version: Optional[str] = None,
+        experience_ids: Optional[List[str]] = None,
+        actor: str = "lead.simulator",
+    ) -> List[Any]:
+        """Counterfactual simulation. Does not execute providers or mutate cases."""
+        from cyberclaw.learning.simulation import StrategySimulator
+
+        strategy = self.learning.get_strategy(strategy_id, version)
+        if experience_ids is None:
+            experiences = self.learning.authoritative_experiences()
+        else:
+            experiences = [self.learning.get_experience(eid) for eid in experience_ids]
+            experiences = [exp for exp in experiences if exp is not None]
+        reports = StrategySimulator.simulate(
+            strategy,
+            experiences,
+            policy_engine=self.policy_engine,
+            actor=actor,
+        )
+        self.learning_service.record_simulation(strategy.strategy_id, strategy.version, actor)
+        return reports
+
+    def evaluate_learned_strategy(
+        self,
+        strategy_id: str,
+        version: Optional[str] = None,
+        actor: str = "lead.evaluator",
+    ) -> Any:
+        from cyberclaw.learning.evaluation import StrategyEvaluator
+        from cyberclaw.learning.simulation import StrategySimulator
+
+        strategy = self.learning.get_strategy(strategy_id, version)
+        experiences = [
+            self.learning.get_experience(eid)
+            for eid in strategy.provenance.get("supporting_experience_ids", [])
+        ]
+        experiences = [exp for exp in experiences if exp is not None]
+        reports = StrategySimulator.simulate(strategy, experiences, policy_engine=self.policy_engine, actor=actor)
+        evaluation = StrategyEvaluator.evaluate(strategy, reports, experiences)
+        self.learning_service.record_evaluation(evaluation, actor)
+        return evaluation
+
+    def review_learned_strategy(self, strategy_id: str, version: str, actor: str) -> Any:
+        return self.learning_service.mark_reviewed(strategy_id, version, actor)
+
+    def approve_learned_strategy(
+        self,
+        strategy_id: str,
+        version: str,
+        actor: str,
+        decision: Any,
+        reason: str,
+        evidence_refs: Optional[List[str]] = None,
+    ) -> Any:
+        policy = self.policy_engine.registry.get_default_policy()
+        return self.learning_service.approve(
+            strategy_id,
+            version,
+            actor,
+            decision,
+            reason,
+            evidence_refs=evidence_refs,
+            policy_id=policy.policy_id,
+            policy_version=policy.version,
+        )
+
+    def publish_learned_strategy(
+        self,
+        strategy_id: str,
+        version: str,
+        actor: str,
+        actor_role: str = "lead_investigator",
+        investigation_id: str = "learning-registry",
+    ) -> Any:
+        return self.learning_service.publish(
+            strategy_id,
+            version,
+            actor,
+            actor_role,
+            self.policy_engine,
+            investigation_id,
+        )
+
+    def query_learned_strategies(
+        self,
+        investigation_id: str,
+        available_capabilities: Optional[List[str]] = None,
+        available_specialists: Optional[List[str]] = None,
+        actor_permissions: Optional[List[str]] = None,
+        actor: str = "lead.planner",
+        actor_role: str = "lead_investigator",
+    ) -> Any:
+        inv = self.get_investigation(investigation_id, actor="core.system")
+        gaps = []
+        if investigation_id in self._knowledge_graphs:
+            gaps = self.find_knowledge_gaps(investigation_id)
+        return self.planning_engine.request_strategy_candidates(
+            investigation=inv,
+            learning_registry=self.learning,
+            knowledge_gaps=gaps,
+            available_capabilities=available_capabilities,
+            available_specialists=available_specialists,
+            actor_permissions=actor_permissions,
+            policy_engine=self.policy_engine,
+            actor=actor,
+            actor_role=actor_role,
+        )
+
+    def record_strategy_outcome(self, outcome: Any, actor: str = "lead.reviewer") -> Any:
+        return self.learning.record_outcome(outcome, actor=actor)
+
+    def replay_learning_state(self, until_sequence: Optional[int] = None) -> Any:
+        from cyberclaw.replay.engine import ReplayEngine
+
+        return ReplayEngine.replay_learning_state(self.learning.events, until_sequence=until_sequence)
+
+    def explain_learned_strategy(self, strategy_id: str, version: Optional[str] = None) -> Any:
+        from cyberclaw.replay.engine import ReplayEngine
+
+        return ReplayEngine.explain_strategy_origin(self.learning.events, strategy_id, version=version)
+
+    def persist_learning_state(self) -> Any:
+        from cyberclaw.learning.persistence import LearningPersistenceManager
+
+        return LearningPersistenceManager.save(self.learning, self.workspace.base_path)
+
+    def load_learning_state(self) -> Any:
+        from cyberclaw.learning.persistence import LearningPersistenceManager
+        from cyberclaw.learning.proposals import LearningService
+
+        self.learning = LearningPersistenceManager.load(self.workspace.base_path)
+        self.learning_service = LearningService(self.learning)
+        return self.learning
+
+    def project_learning_knowledge_graph(self) -> Any:
+        """Project learned relationships onto a registry-owned graph, not a case graph."""
+        return self.learning.project_learning_graph()
 
 
 

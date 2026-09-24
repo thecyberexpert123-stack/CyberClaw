@@ -22,6 +22,7 @@ class WorkspaceLayout:
         "branches",      # Isolated branch contexts and counterfactual history
         "collaboration", # Collaboration requests, conflicts, and dependency graphs
         "knowledge",     # Temporal Knowledge Graph nodes, edges, manifests, integrity
+        "learning",      # Cross-case experience, patterns, and strategy registry
     ]
 
     def __init__(self, root: Path) -> None:

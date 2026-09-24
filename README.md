@@ -133,12 +133,28 @@ CyberClaw/
 │   │   ├── consistency.py      # KnowledgeConsistencyEngine (contradictions, gaps, dangling refs, cycles)
 │   │   ├── persistence.py      # KnowledgePersistenceManager atomic serialization & integrity reload
 │   │   └── errors.py           # Structured Knowledge Graph exception taxonomy
+│   ├── learning/               # Cross-Case Experience & Investigation Strategy Learning v0.1
+│   │   ├── models.py           # Experience, pattern, strategy, evaluation, and ledger models
+│   │   ├── extraction.py       # Read-only InvestigationExperience extraction
+│   │   ├── normalization.py    # Comparable features that retain source record IDs
+│   │   ├── clustering.py       # Source-family union-find; prevents sample inflation
+│   │   ├── patterns.py         # Exact-signature PatternDetector; correlation, not causation
+│   │   ├── confidence.py       # Qualitative confidence bands with explicit dimensions
+│   │   ├── strategies.py       # Structured InvestigationStrategy intents and lifecycle
+│   │   ├── applicability.py    # Versioned structured-Jaccard applicability matching
+│   │   ├── simulation.py       # Counterfactual simulation without provider execution
+│   │   ├── evaluation.py       # Multidimensional evaluation and regression detection
+│   │   ├── proposals.py        # Ingest/propose loop; never self-approves
+│   │   ├── governance.py       # External approval, policy precheck, publication gates
+│   │   ├── registry.py         # Versioned registry, ledger, and event-sourced replay
+│   │   ├── persistence.py      # Atomic learning/registry.json with digest verification
+│   │   └── errors.py           # Learning exception taxonomy
 │   ├── validation/             # Multi-phase Validation Pipeline
 │   │   ├── errors.py           # Schema, Policy, State, and Result validation errors
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 341 unit & integration tests covering all requirements
+├── tests/                      # 387 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -641,7 +657,98 @@ CyberClaw integrates a domain-neutral, provenance-preserving, temporal knowledge
 
 ---
 
-## 16. Running the Tests
+## 16. Cross-Case Experience & Investigation Strategy Learning v0.1
+
+CyberClaw can learn structured investigative patterns from completed investigations and propose improved strategies without becoming an uncontrolled self-modifying agent. Learning remembers what happened. It does not become authority by itself.
+
+```text
+Completed Cases
+      ↓
+Experience Extraction
+      ↓
+Normalization
+      ↓
+Pattern Detection
+      ↓
+Pattern Validation
+      ↓
+Strategy Proposal
+      ↓
+Counterfactual Simulation
+      ↓
+Evaluation
+      ↓
+Approval
+      ↓
+Strategy Registry
+      ↓
+Adaptive Planner
+      ↓
+Runtime
+      ↓
+New Investigation
+      ↓
+Experience
+```
+
+### Learning Axioms
+Experience is not truth. Correlation is not causation. Repeated success is not a guarantee. A pattern is not a strategy. A strategy is not execution. A proposal is not approval. Approval is not trust. Trust is not unlimited authority. Simulation is not real execution. A counterfactual result is not a historical result. Specialist or case-local experience does not automatically become global knowledge. A learning failure must not mutate authoritative case state. No learned pattern may bypass policy, capability governance, or runtime. No learned strategy may execute itself.
+
+### Experience, Patterns, and Strategies
+* **Extraction (`extraction.py`)**: `InvestigationExperience` is reconstructed from CaseState, the Case Journal, execution history, evidence, requirements, hypotheses, contradictions, and knowledge-journal references. Absent facts stay absent. Every experience keeps authoritative record IDs rather than replacing them with an untraceable copy.
+* **Normalization (`normalization.py`)**: action, requirement, specialist, capability, evidence-yield, contradiction, planning, collaboration, duration, and failure/retry features are comparable, but each feature retains the source investigation, source record IDs, normalization version `0.1.0`, and source timestamp.
+* **Source independence (`clustering.py`)**: experiences that share a declared template, feed, experiment, or upstream source are one `SourceFamily`. Sample count and independent-family count are reported separately. This uses the same source-lineage idea as knowledge provenance.
+* **Pattern detection (`patterns.py`)**: algorithm `signature_equality_v0.1` groups exact canonical signatures. Supported kinds include repeated success, repeated failure, contradiction resolution, requirement sequence, collaboration, capability sequence, evidence yield, planning adaptation, recovery, and stopping. The detector reports counts. It does not conclude that a strategy always works.
+* **Confidence (`confidence.py`)**: support is a qualitative band (`INSUFFICIENT`, `WEAK`, `MODERATE`, `STRONG`) explained from sample count, independent cases, independent source families, successes, failures, contradictions, and the active threshold policy. There is no single score treated as objective truth, and registry order is never an opaque preference.
+* **Strategy (`strategies.py`)**: an `InvestigationStrategy` is versioned structured intent. Steps name what to try, including contradiction-resolution and authorized capability requests. They are not Python, shell, or provider invocations. `executable` is always false.
+
+### Lifecycle, Applicability, and Governance
+```text
+PROPOSED → SIMULATED → EVALUATED → REVIEWED → APPROVED → AVAILABLE → DEPRECATED → RETIRED
+```
+Alternative terminal or holding states are `REJECTED`, `DISABLED`, and `QUARANTINED`. `PROPOSED` cannot jump to `APPROVED` or `AVAILABLE`.
+
+Promotion is explicit:
+```text
+single case                         → case-local experience
+below independence floor            → not a global pattern
+independent validated pattern       → strategy proposal
+external approval                   → APPROVED
+policy-prechecked publication       → AVAILABLE
+```
+The architectural floor is 2 independent investigations and 2 independent source families. Threshold policy may raise that floor. It may not lower it. The active policy id and version are stored on every pattern and regression signal.
+
+`ApplicabilityProfile` states applicable contexts, exclusions, required capabilities, required permissions, and known failure conditions. Matching uses `structured_jaccard_v0.1` with published weights. Missing capabilities, missing permissions, and information-gap mismatch are hard exclusions. Similarity is not assumed generalization and is not objective truth.
+
+`StrategyApprovalDecision` is externally generated. The learning engine and the proposer cannot approve the strategy. Decisions are `APPROVE`, `REJECT`, `REQUEST_MORE_EVIDENCE`, and `DEFER`. Publication additionally requires an isolated PolicyEngine precheck. Learning does not modify policies, permissions, capability trust, DFA definitions, or Core code.
+
+### Simulation, Evaluation, and Regression
+`StrategySimulator` compares a strategy with historical experiences and counterfactual branches. It answers whether the structural preconditions for a gap, fewer steps, extra contradictions, missing capabilities, or an authorization boundary were present. Answers are labeled counterfactual and carry `causal_claim=NONE`. The simulator does not execute providers, grant capabilities, mutate CaseState, or write decisions into the live PolicyEngine.
+
+`StrategyEvaluation` reports information gain, requirement resolution, evidence quality, contradiction resolution, unnecessary actions, execution cost, latency, failure rate, authorization complexity, specialist dependency, and recovery independently. Comparisons list trade-offs and do not declare a winner.
+
+`StrategyRegressionDetector` can recommend review, deprecation, or disabling when governed thresholds are crossed. It does not delete historical usage and does not apply the lifecycle change itself. An external actor must review it. Deprecated strategies remain queryable as historical versions.
+
+### Planner, Runtime, Replay, Branching, and Knowledge
+The Adaptive Planner can request candidates through `request_strategy_candidates`. Candidates include strategy id and version, applicability explanation, supporting cases, independent case count, known failures, required capabilities and permissions, risk factors, evaluation history, and policy precheck. The planner does not execute them. Runtime remains the only execution substrate.
+
+Replay reconstructs learning state from the learning ledger. `replay_learning_state`, `get_strategy_history`, `get_pattern_history`, and `explain_strategy_origin` do not re-run today's detector, today's evaluator, or today's thresholds, and they do not execute anything.
+
+Branch strategy evaluations are `CandidateBranchExperience` records with `is_counterfactual=True`. They are quarantined and do not become authoritative experience.
+
+Learned relationships are projected onto a separate learning knowledge graph, not into a case graph. Mapping uses existing edge types plus `metadata.learning_relation`: `SUPPORTED_BY`, `OBSERVED_IN`, `GENERATED`, `FAILED_IN`, and `APPLICABLE_TO`. Those edges are inferences, not observations.
+
+Persistence writes `learning/registry.json` atomically and refuses to load a digest mismatch.
+
+### Security Boundaries
+A learned strategy is structured data. The package rejects `eval`, `exec`, imports, shell commands, and similar executable fragments. It does not generate code, deploy code, escalate privilege, change policy, change capability trust, open hidden specialist channels, or call providers.
+
+### Known Limitations
+v0.1 does not implement reinforcement learning, model fine-tuning, neural strategy generation, embeddings, online training, external ML services, automatic approval, automatic trust escalation, automatic policy or capability changes, or cross-installation learning. Pattern identity is exact and versioned. Similar workflows corroborate only when their canonical signature matches; a recovered retry collapses consecutive duplicate capability calls but does not fuzzy-match unrelated sequences.
+
+---
+
+## 17. Running the Tests
 
 Install dependencies and run the test suite:
 
