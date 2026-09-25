@@ -18,7 +18,7 @@ from cyberclaw.correlation.rules import (
     SharedInfrastructureCorrelationRule,
 )
 from cyberclaw.evidence.models import Evidence
-from cyberclaw.types import Entity, Relationship
+from cyberclaw.types import Entity, Relationship, has_entity, normalize_entity_index, remember_entity
 
 
 class CorrelationResult(BaseModel):
@@ -56,7 +56,7 @@ class CorrelationEngine:
         investigation_id: str = "global",
     ) -> CorrelationResult:
         """Run all correlation rules over evidence to derive entities and relationships."""
-        entities_dict: Dict[str, Entity] = dict(existing_entities or {})
+        entities_dict: Dict[str, Entity] = normalize_entity_index(dict(existing_entities or {}))
         derived_relationships: List[Relationship] = []
         contradictions_found: List[ContradictionRecord] = []
 
@@ -66,8 +66,8 @@ class CorrelationEngine:
             entities, rels, contras = rule.evaluate(evidence_list, entities_dict, investigation_id)
 
             for ent in entities:
-                if ent.name not in entities_dict:
-                    entities_dict[ent.name] = ent
+                if not has_entity(entities_dict, ent.name, ent.type):
+                    remember_entity(entities_dict, ent)
 
             for rel in rels:
                 key = (rel.source_id, rel.target_id, rel.relation_type, rel.is_inferred)

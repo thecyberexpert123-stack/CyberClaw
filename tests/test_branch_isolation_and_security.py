@@ -49,13 +49,13 @@ def test_branch_state_and_authoritative_isolation():
     )
 
     # Verify branch state was updated
-    assert "192.168.1.100" in branch.entities
+    assert any(entity.name == "192.168.1.100" for entity in branch.entities.values())
     assert branch.hypotheses[hyp_id].status == "SUPPORTED"
     assert branch.hypotheses[hyp_id].confidence == 0.95
 
     # Verify authoritative case was NOT mutated
     assert len(inv.entities) == initial_entities_count
-    assert "192.168.1.100" not in inv.entities
+    assert not any(entity.name == "192.168.1.100" for entity in inv.entities.values())
     assert inv.hypotheses[hyp_id].status == "OPEN"
     assert inv.hypotheses[hyp_id].confidence == initial_hypotheses[hyp_id]
     assert len(inv.case_manager.journal.entries) == initial_journal_len

@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Adversarial Authority Probe & Security Contract Hardening v0.2
+
+### Lesson 33: A Boolean Is Not an Approval Record
+- **Observation**: FOUND A REAL VIOLATION. `execute_action(approval_granted=True)` synthesized the token `"granted"`. `PolicyEvaluator` treated any non-empty token as approval, so a simulated destructive provider ran. An arbitrary token was enough for `PolicyEngine.authorize` to return ALLOW. A lead could approve their own proposal. An analyst role was already rejected. A token returned by `request_approval` did not authorize `execute_action`, because the permission gate still wanted the boolean.
+- **Consequence**: The caller could mint destructive authority, and the only legitimate approval path did not reach execution.
+- **Resolution**: Approval is `token → approval record → validation → authorization`. The record is issued only by `request_approval`, bound to case, capability, version, scope, and requester, and rejected when expired, mismatched, or issued by the proposer. `execute_action` ignores the boolean. The evaluator no longer upgrades `REQUIRE_APPROVAL` from a string. The old success test that passed `approval_granted=True` now uses an issued record.
+
+### Lesson 34: A Name Is Not an Identity
+- **Observation**: FOUND A REAL VIOLATION. `Investigation.add_entity` deduped by type and name, then stored `entities[name]`. Adding `domain/example.com` and `organization/example.com` left one entity. Adding the domain again did not dedupe, because the first record had already been overwritten. Replay and branch simulation used the same name key.
+- **Consequence**: Two investigative identities collapsed, and a later write of the original type replaced the survivor instead of updating it.
+- **Resolution**: Storage identity is `(type, name)`. Replay, branch simulation, correlation, snapshots, and knowledge materialization use that key. A name-only historical index is migrated from the entity's own type and name and resealed; the migration does not invent an entity the old index already lost. Two different entities that would share one canonical key raise `EntityIdentityError`.
+
+### Lesson 35: Approval Does Not Upgrade Provisional Trust
+- **Observation**: FOUND A REAL VIOLATION for high-impact provisional execution. `PROVISIONAL` plus consequential or destructive reached the simulated provider when `approval_granted=True` and a token were supplied. `request_approval` turned a provisional destructive decision into ALLOW. `UNTRUSTED` and `REVOKED` were already blocked by capability validation. `PROVISIONAL` plus reversible was already denied by the fail-closed default. Those cells were not changed.
+- **Consequence**: An approval record, or a string pretending to be one, could stand in for trust on a consequential or destructive action.
+- **Resolution**: One policy rule, `R007-DENY-PROVISIONAL-HIGH-IMPACT`, denies provisional consequential and destructive execution. DENY is not upgraded by a matching grant. The default policy version is `1.1.0`. `Capability.is_executable()` still treats provisional as executable so reversible policy behavior stays where it was.
+
 ## Milestone: Authority Boundary Hardening & Contract Unification v0.1
 
 ### Lesson 30: An Advertisement Is Not a Registry

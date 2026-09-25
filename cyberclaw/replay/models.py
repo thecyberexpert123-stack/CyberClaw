@@ -19,7 +19,7 @@ from cyberclaw.case.models import (
 from cyberclaw.coordination.requirements import InformationRequirement, RequirementStatus
 from cyberclaw.evidence.models import Evidence
 from cyberclaw.planning.models import InvestigationPlan, StoppingCondition
-from cyberclaw.types import Entity, Hypothesis, Relationship
+from cyberclaw.types import Entity, Hypothesis, Relationship, normalize_entity_index
 
 
 class ReconstructedState(BaseModel):
@@ -97,8 +97,8 @@ class ReconstructedState(BaseModel):
         recon_ev_ids = {e.id for e in self.evidence}
         if snap_ev_ids != recon_ev_ids:
             return False
-        # Entity check
-        if set(snapshot.entities.keys()) != set(self.entities.keys()):
+        # Entity identity is (type, name), not the historical dict key spelling.
+        if set(normalize_entity_index(snapshot.entities)) != set(normalize_entity_index(self.entities)):
             return False
         # Hypothesis status check
         for hid, snap_hyp in snapshot.hypotheses.items():

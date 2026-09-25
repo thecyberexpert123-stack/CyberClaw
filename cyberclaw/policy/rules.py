@@ -149,6 +149,20 @@ def create_standard_rules() -> List[PolicyRule]:
             },
         ),
         PolicyRule(
+            rule_id="R007-DENY-PROVISIONAL-HIGH-IMPACT",
+            name="Deny Provisional High-Impact Execution",
+            description=(
+                "Provisional trust cannot execute consequential or destructive actions. "
+                "An approval record does not upgrade provisional trust."
+            ),
+            effect=PolicyEffect.DENY,
+            priority=12,
+            conditions={
+                "disallowed_trust_states": [CapabilityTrustState.PROVISIONAL.value],
+                "disallowed_action_scopes": ["consequential", "destructive", "irreversible"],
+            },
+        ),
+        PolicyRule(
             rule_id="R002-DENY-INACTIVE-LIFECYCLE",
             name="Deny Inactive or Quarantined Capabilities",
             description="Capabilities in retired, disabled, rejected, or quarantined states cannot execute.",

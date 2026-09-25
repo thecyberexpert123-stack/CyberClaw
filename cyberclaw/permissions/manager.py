@@ -147,13 +147,25 @@ class PermissionManager:
         required_permission: Optional[str] = None,
         scope: ActionScope = ActionScope.REVERSIBLE,
         approval_granted: bool = False,
+        approval_delegated: bool = False,
     ) -> Tuple[bool, Optional[str]]:
-        """Validate whether an actor is authorized to perform an action under a given scope."""
+        """Validate whether an actor is authorized to perform an action under a given scope.
+
+        `approval_granted` is an internal signal that the caller already holds a
+        verified approval record. It is not itself an approval record. Execution
+        does not forward a caller-supplied boolean. When `approval_delegated` is
+        set, destructive approval is owned by the policy engine instead.
+        """
         # Destructive actions require explicit approval unless system admin
         effective_perms = self.get_effective_permissions(actor)
         is_admin = PERM_SYSTEM_ADMIN in effective_perms
 
-        if scope == ActionScope.DESTRUCTIVE and not approval_granted and not is_admin:
+        if (
+            scope == ActionScope.DESTRUCTIVE
+            and not approval_granted
+            and not is_admin
+            and not approval_delegated
+        ):
             self._log_audit(actor, action, required_permission or "", scope, False, "Explicit approval required")
             return False, "DESTRUCTIVE scope requires explicit approval"
 
@@ -175,9 +187,17 @@ class PermissionManager:
         required_permission: Optional[str] = None,
         scope: ActionScope = ActionScope.REVERSIBLE,
         approval_granted: bool = False,
+        approval_delegated: bool = False,
     ) -> None:
         """Enforce permission, raising PermissionDeniedError or ApprovalRequiredError on failure."""
-        allowed, reason = self.check_permission(actor, action, required_permission, scope, approval_granted)
+        allowed, reason = self.check_permission(
+            actor,
+            action,
+            required_permission,
+            scope,
+            approval_granted,
+            approval_delegated=approval_delegated,
+        )
         if not allowed:
             if "approval" in (reason or "").lower():
                 raise ApprovalRequiredError(actor, action, scope)

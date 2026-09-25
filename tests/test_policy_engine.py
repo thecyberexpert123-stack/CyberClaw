@@ -744,25 +744,43 @@ def test_core_execute_action_approval_required_flow(tmp_path: Path):
     core.transition_investigation(inv.id, CoreState.INVESTIGATE, event="start")
 
     from cyberclaw.validation.errors import PolicyValidationError as ValPolicyValidationError
-    # Without approval token / approval_granted, it must fail
-    with pytest.raises((PolicyValidationError, ValPolicyValidationError)):
+    # A caller boolean is not an approval record. Updated from the previous
+    # contract, which treated approval_granted=True as sufficient authority.
+    with pytest.raises((PolicyValidationError, ValPolicyValidationError, ApprovalRequiredError)):
         core.execute_action(
             investigation_id=inv.id,
             capability_id=cap.id,
             parameters={},
             actor="operator.bob",
             scope=ActionScope.DESTRUCTIVE,
-            approval_granted=False,
+            approval_granted=True,
         )
 
-    # With approval_granted=True, execution succeeds
+    denied = core.policy_engine.authorize(
+        PolicyExecutionContext(
+            investigation_id=inv.id,
+            case_stage=CoreState.INVESTIGATE.value,
+            actor_id="operator.bob",
+            actor_role=ActorRole.OPERATOR.value,
+            capability_id=cap.id,
+            capability_version=cap.version,
+            action_scope=ActionScope.DESTRUCTIVE.value,
+            lifecycle_state=cap.lifecycle_state.value,
+            trust_state=cap.trust_state.value,
+        )
+    )
+    approved = core.policy_engine.request_approval(
+        decision_id=denied.decision_id,
+        approver_id="lead.sam",
+        approver_role=ActorRole.LEAD_INVESTIGATOR.value,
+    )
     result = core.execute_action(
         investigation_id=inv.id,
         capability_id=cap.id,
         parameters={},
         actor="operator.bob",
         scope=ActionScope.DESTRUCTIVE,
-        approval_granted=True,
+        approval_token=approved.context_snapshot["approval_token"],
     )
     assert result.is_success is True
 

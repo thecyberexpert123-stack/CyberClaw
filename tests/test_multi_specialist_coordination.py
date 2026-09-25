@@ -230,7 +230,7 @@ def test_section_22_end_to_end_coordination_demonstration(tmp_path: Path):
     # 8. Run Correlation Engine: Derives Domain entity, IP entity, and observed resolves_to relationship
     corr_res1 = core.correlate_investigation(inv.id)
     assert len(inv.entities) >= 2
-    assert "apex-corp.org" in inv.entities
+    assert any(entity.name == "apex-corp.org" for entity in inv.entities.values())
     # Discovered IP entity from DNS
     discovered_ip = [e.name for e in inv.entities.values() if e.type == "ip"][0]
     assert discovered_ip == "93.184.216.34"

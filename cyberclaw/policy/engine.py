@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 from cyberclaw.case.models import DecisionType, JournalEntryType
 from cyberclaw.policy.errors import (
@@ -16,12 +17,14 @@ from cyberclaw.policy.errors import (
 from cyberclaw.policy.evaluator import PolicyEvaluator
 from cyberclaw.policy.models import (
     ActorRole,
+    ApprovalGrant,
     AuthorizationDecision,
     AuthorizationDecisionType,
     Policy,
     PolicyExecutionContext,
     RiskAssessment,
     RiskLevel,
+    utc_now,
 )
 from cyberclaw.policy.registry import PolicyRegistry
 from cyberclaw.policy.risk import RiskEvaluator
@@ -34,6 +37,7 @@ class PolicyEngine:
         self.registry: PolicyRegistry = registry or PolicyRegistry()
         self._decisions: Dict[str, AuthorizationDecision] = {}
         self._pending_approvals: Dict[str, AuthorizationDecision] = {}
+        self._approval_grants: Dict[str, ApprovalGrant] = {}
 
     def authorize(
         self,
@@ -75,8 +79,9 @@ class PolicyEngine:
             self._decisions[decision.decision_id] = decision
             return decision
 
-        # 3. Policy Rule Evaluation
+        # 3. Policy Rule Evaluation. The evaluator does not treat a token string as approval.
         decision = PolicyEvaluator.evaluate(policy=policy, context=context, risk=risk_assessment)
+        decision = self._apply_approval_grant(decision, context)
 
         # 4. Record and track
         self._decisions[decision.decision_id] = decision
@@ -85,12 +90,71 @@ class PolicyEngine:
 
         return decision
 
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def _match_grant(self, context: PolicyExecutionContext) -> Tuple[Optional[ApprovalGrant], str]:
+        """Resolve a caller token to an approval record bound to this request.
+
+        A missing, expired, or mismatched record is not approval. The token
+        value itself is never evidence.
+        """
+        token = context.approval_token or ""
+        grant = self._approval_grants.get(token)
+        if grant is None:
+            return None, "no approval record"
+        if grant.expires_at is not None and self._as_utc(grant.expires_at) <= utc_now():
+            return None, "approval record expired"
+        if grant.approver_id == grant.actor_id:
+            return None, "proposer approved their own proposal"
+        if grant.investigation_id != context.investigation_id:
+            return None, "different case"
+        if grant.capability_id != context.capability_id:
+            return None, "different capability"
+        if grant.capability_version != context.capability_version:
+            return None, "different capability version"
+        if grant.action_scope != context.action_scope:
+            return None, "different scope"
+        if grant.actor_id != context.actor_id:
+            return None, "different requester"
+        valid_roles = {ActorRole.LEAD_INVESTIGATOR.value, ActorRole.SYSTEM.value}
+        if grant.approver_role.lower() not in valid_roles:
+            return None, "unauthorized approver role"
+        return grant, ""
+
+    def _apply_approval_grant(
+        self,
+        decision: AuthorizationDecision,
+        context: PolicyExecutionContext,
+    ) -> AuthorizationDecision:
+        """Fulfill REQUIRE_APPROVAL only from a matching grant.
+
+        DENY is not upgraded. A token that does not resolve remains unapproved.
+        """
+        if decision.decision != AuthorizationDecisionType.REQUIRE_APPROVAL or not context.approval_token:
+            return decision
+        grant, reason = self._match_grant(context)
+        if grant is None:
+            decision.reasons.append(f"Approval validation rejected token: {reason}")
+            return decision
+        decision.decision = AuthorizationDecisionType.ALLOW
+        decision.reasons.append(
+            f"Requirement fulfilled via approval record issued to approver '{grant.approver_id}'."
+        )
+        decision.obligations = [item for item in decision.obligations if item != "SOLICIT_HUMAN_APPROVAL"]
+        decision.obligations.append("LOG_APPROVAL_DISPATCH")
+        return decision
+
     def request_approval(
         self,
         decision_id: str,
         approver_id: str,
         approver_role: str = ActorRole.LEAD_INVESTIGATOR.value,
         reason: str = "Lead investigator approved execution",
+        expires_at: Optional[datetime] = None,
     ) -> AuthorizationDecision:
         """Grant explicit human or lead approval for an action requiring authorization."""
         if decision_id not in self._decisions:
@@ -112,9 +176,29 @@ class PolicyEngine:
                 f"Actor with role '{approver_role}' lacks authority to approve; requires lead or system authority."
             )
 
-        # Re-construct context with approval token
         snapshot = dict(old_decision.context_snapshot)
-        snapshot["approval_token"] = str(uuid4())
+        proposer = str(snapshot.get("actor_id") or "")
+        if approver_id == proposer:
+            raise PolicyValidationError(
+                f"Actor '{approver_id}' cannot approve their own proposal."
+            )
+
+        token = str(uuid4())
+        grant = ApprovalGrant(
+            token=token,
+            decision_id=decision_id,
+            investigation_id=str(snapshot.get("investigation_id") or ""),
+            capability_id=str(snapshot.get("capability_id") or ""),
+            capability_version=str(snapshot.get("capability_version") or "1.0.0"),
+            action_scope=str(snapshot.get("action_scope") or ""),
+            actor_id=proposer,
+            approver_id=approver_id,
+            approver_role=approver_role,
+            issued_at=utc_now(),
+            expires_at=expires_at,
+        )
+        self._approval_grants[token] = grant
+        snapshot["approval_token"] = token
         snapshot["approver_id"] = approver_id
         new_context = PolicyExecutionContext(**snapshot)
 

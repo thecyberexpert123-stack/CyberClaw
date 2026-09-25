@@ -55,8 +55,8 @@ def test_branch_replay_determinism():
 
     assert recon_1.state_digest == recon_2.state_digest
     assert len(recon_1.evidence) == len(recon_2.evidence) == 2  # 1 baseline + 1 simulated
-    assert "smtp.example.org" in recon_1.entities
-    assert "smtp.example.org" in recon_2.entities
+    assert any(entity.name == "smtp.example.org" for entity in recon_1.entities.values())
+    assert any(entity.name == "smtp.example.org" for entity in recon_2.entities.values())
 
 
 def test_branch_time_travel():
@@ -78,12 +78,12 @@ def test_branch_time_travel():
 
     # Query state at local sequence 2 (before evidence was ingested)
     state_seq_2 = BranchEngine.replay_branch(branch, inv, until_local_sequence=2)
-    assert "server-01" in state_seq_2.entities
+    assert any(entity.name == "server-01" for entity in state_seq_2.entities.values())
     assert len(state_seq_2.evidence) == 1  # Only baseline evidence
 
     # Query state at local sequence 3 (after evidence was ingested)
     state_seq_3 = BranchEngine.replay_branch(branch, inv, until_local_sequence=3)
-    assert "server-01" in state_seq_3.entities
+    assert any(entity.name == "server-01" for entity in state_seq_3.entities.values())
     assert len(state_seq_3.evidence) == 2  # Baseline + simulated evidence
 
 

@@ -461,7 +461,7 @@ class CyberClawCore:
         actor: str = "core.system",
         target_specialist_id: Optional[str] = None,
         scope: ActionScope = ActionScope.CONSEQUENTIAL,
-        approval_granted: bool = False,
+        approval_granted: bool = False,  # ignored; not an approval record
         custom_lesson: Optional[str] = None,
         actor_role: Optional[str] = None,
         policy_id: Optional[str] = None,
@@ -469,7 +469,12 @@ class CyberClawCore:
         approval_token: Optional[str] = None,
         requirement_id: Optional[str] = None,
     ) -> ExecutionResult:
-        """Orchestrate the full end-to-end execution lifecycle:
+        """Orchestrate the full end-to-end execution lifecycle.
+
+        `approval_granted` is accepted for caller compatibility and ignored.
+        It is not an approval record. Pass `approval_token` only when
+        PolicyEngine.request_approval has issued one for this request.
+
         1. Validate current DFA state, parameters schema, and permissions.
         2. Evaluate contextual Policy and assess risk.
         3. Route request to Specialist endpoint (or Capability Provider).
@@ -502,6 +507,8 @@ class CyberClawCore:
 
         # 1. Multi-phase pre-execution validation
         allowed_dfa_states = [CoreState.READY, CoreState.CLASSIFY, CoreState.INVESTIGATE, CoreState.VERIFY]
+        # The caller boolean is not approval evidence. Destructive approval is
+        # decided by the policy engine against an issued approval record.
         ValidationPipeline.validate_request(
             capability=capability,
             parameters=parameters,
@@ -510,7 +517,8 @@ class CyberClawCore:
             current_state=inv.current_state,
             allowed_states=allowed_dfa_states,
             scope=scope,
-            approval_granted=approval_granted,
+            approval_granted=False,
+            approval_delegated=True,
         )
 
         # 2. Contextual Policy Authorization Evaluation & Risk Assessment
@@ -529,7 +537,7 @@ class CyberClawCore:
             parameters=parameters,
             is_branch=getattr(inv, "is_branch", False),
             branch_id=getattr(inv, "branch_id", None),
-            approval_token=approval_token or ("granted" if approval_granted else None),
+            approval_token=approval_token,
             requires_supervision_acknowledged=supervision_acknowledged,
         )
         auth_decision = self.policy_engine.authorize(policy_ctx, policy_id=policy_id)

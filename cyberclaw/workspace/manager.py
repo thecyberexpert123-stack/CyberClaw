@@ -144,7 +144,24 @@ class WorkspaceManager:
             return []
         raw = self.read_text(index_file)
         data = json.loads(raw)
-        return [InvestigationSnapshot.model_validate(item) for item in data]
+        from cyberclaw.types import normalize_entity_index
+
+        loaded = []
+        for item in data:
+            snap = InvestigationSnapshot.model_validate(item)
+            if not snap.verify_integrity():
+                loaded.append(snap)
+                continue
+            migrated = normalize_entity_index(snap.entities)
+            if set(migrated) != set(snap.entities):
+                # The stored digest matched the name-only index. Rekey explicitly
+                # and reseal; do not pretend the historical key spelling was canonical.
+                snap.entities = migrated
+                snap.metadata = dict(snap.metadata)
+                snap.metadata["entity_index_migrated"] = True
+                snap.seal()
+            loaded.append(snap)
+        return loaded
 
     def persist_journal(self, investigation_id: str, entries: List[Any]) -> Path:
         """Persist chronological case journal to workspace."""

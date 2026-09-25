@@ -42,7 +42,7 @@ from cyberclaw.memory.experience import ExperienceRecord
 from cyberclaw.planning.models import RequirementCandidate
 from cyberclaw.replay.engine import ReplayEngine
 from cyberclaw.replay.models import ReconstructedState
-from cyberclaw.types import Entity, Hypothesis, Relationship
+from cyberclaw.types import Entity, Hypothesis, Relationship, remember_entity
 
 
 class BranchEngine:
@@ -226,9 +226,10 @@ class BranchEngine:
     ) -> None:
         """Incorporate simulated entities and relationships into branch topology."""
         for ent in entities:
-            branch.entities[ent.name] = ent.model_copy(deep=True)
+            copied = ent.model_copy(deep=True)
+            remember_entity(branch.entities, copied)
             if branch.derived_state:
-                branch.derived_state.entities[ent.name] = ent.model_copy(deep=True)
+                remember_entity(branch.derived_state.entities, copied.model_copy(deep=True))
 
             cls.apply_simulated_event(
                 branch=branch,
@@ -436,7 +437,7 @@ class BranchEngine:
                 ent_data = entry.details.get("entity")
                 if ent_data:
                     ent = Entity(**ent_data) if isinstance(ent_data, dict) else ent_data
-                    recon.entities[ent.name] = ent.model_copy(deep=True)
+                    remember_entity(recon.entities, ent.model_copy(deep=True))
 
             elif etype == JournalEntryType.RELATIONSHIP_ADDED:
                 rel_data = entry.details.get("relationship")
@@ -448,7 +449,7 @@ class BranchEngine:
             elif etype == JournalEntryType.CORRELATION_COMPLETED:
                 for ent_data in entry.details.get("entities", []):
                     ent = Entity(**ent_data) if isinstance(ent_data, dict) else ent_data
-                    recon.entities[ent.name] = ent.model_copy(deep=True)
+                    remember_entity(recon.entities, ent.model_copy(deep=True))
                 for rel_data in entry.details.get("relationships", []):
                     rel = Relationship(**rel_data) if isinstance(rel_data, dict) else rel_data
                     if not any(r.id == rel.id for r in recon.relationships):

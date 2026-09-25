@@ -11,7 +11,7 @@ from cyberclaw.policy.rules import create_standard_rules
 
 
 DEFAULT_POLICY_ID = "default-system-policy"
-DEFAULT_POLICY_VERSION = "1.0.0"
+DEFAULT_POLICY_VERSION = "1.1.0"
 
 
 def _semantic_version_key(version: str) -> tuple:

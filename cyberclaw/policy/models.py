@@ -139,6 +139,26 @@ class PolicyExecutionContext(BaseModel):
     supervisor_id: Optional[str] = Field(default=None, description="Supervisor actor ID if acknowledged")
 
 
+class ApprovalGrant(BaseModel):
+    """Authoritative approval record. A token string is only a lookup key.
+
+    The record is issued by PolicyEngine.request_approval. Callers cannot mint
+    one by setting a boolean or choosing a token value.
+    """
+
+    token: str
+    decision_id: str
+    investigation_id: str
+    capability_id: str
+    capability_version: str
+    action_scope: str
+    actor_id: str
+    approver_id: str
+    approver_role: str
+    issued_at: datetime = Field(default_factory=utc_now)
+    expires_at: Optional[datetime] = None
+
+
 class PolicyRule(BaseModel):
     """A deterministic declarative rule within a Policy."""
 

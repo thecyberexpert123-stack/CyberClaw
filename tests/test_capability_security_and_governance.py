@@ -99,7 +99,11 @@ def test_trusted_capabilities_still_enforce_permissions_and_scope(tmp_path):
 
 
 def test_destructive_action_requires_explicit_approval(tmp_path):
-    """Verify that DESTRUCTIVE scoped actions fail unless explicit approval_granted=True is provided."""
+    """Verify that DESTRUCTIVE scoped actions fail without a real approval record.
+
+    `approval_granted=True` used to be treated as that record. It is not.
+    Absence of an issued approval is rejected by policy, not by trusting the boolean.
+    """
     core = CyberClawCore(workspace_path=tmp_path)
     core.startup()
 
@@ -122,7 +126,7 @@ def test_destructive_action_requires_explicit_approval(tmp_path):
     inv = core.create_investigation("Destructive Approval Test", "Testing approval gate")
     core.transition_investigation(inv.id, CoreState.INVESTIGATE, event="start_recon")
 
-    # Attempting destructive action without explicit approval_granted=True must be rejected
+    # A caller boolean is not approval. Policy must still refuse the execution.
     with pytest.raises(PolicyValidationError) as exc_info:
         core.execute_action(
             investigation_id=inv.id,
@@ -130,9 +134,9 @@ def test_destructive_action_requires_explicit_approval(tmp_path):
             parameters={},
             actor="operator.alice",
             scope=ActionScope.DESTRUCTIVE,
-            approval_granted=False,  # Lacks approval!
+            approval_granted=True,
         )
-    assert "destructive scope requires explicit approval" in str(exc_info.value).lower()
+    assert "approval" in str(exc_info.value).lower()
 
 
 def test_branches_cannot_silently_register_capabilities(tmp_path):

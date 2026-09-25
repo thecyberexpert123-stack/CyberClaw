@@ -16,7 +16,7 @@ from cyberclaw.case.models import ContradictionRecord, DecisionRecord
 from cyberclaw.coordination.requirements import InformationRequirement
 from cyberclaw.evidence.models import Evidence
 from cyberclaw.replay.models import ReconstructedState
-from cyberclaw.types import Entity, Hypothesis, Relationship
+from cyberclaw.types import Entity, Hypothesis, Relationship, normalize_entity_index
 from cyberclaw.workspace.manager import WorkspaceManager
 
 
@@ -142,7 +142,11 @@ class BranchPersistence:
             decisions = [DecisionRecord.model_validate(d) for d in decisions_raw]
 
             simulated_ev = [Evidence.model_validate(e) for e in state_raw.get("simulated_evidence", [])]
-            entities = {k: Entity.model_validate(v) for k, v in state_raw.get("entities", {}).items()}
+            raw_entities = {k: Entity.model_validate(v) for k, v in state_raw.get("entities", {}).items()}
+            entities = normalize_entity_index(raw_entities)
+            if set(entities) != set(raw_entities):
+                meta["metadata"] = dict(meta.get("metadata") or {})
+                meta["metadata"]["entity_index_migrated"] = True
             relationships = [Relationship.model_validate(r) for r in state_raw.get("relationships", [])]
             hypotheses = {k: Hypothesis.model_validate(h) for k, h in state_raw.get("hypotheses", {}).items()}
             requirements = {k: InformationRequirement.model_validate(r) for k, r in state_raw.get("requirements", {}).items()}

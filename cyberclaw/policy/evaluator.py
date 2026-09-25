@@ -74,21 +74,18 @@ class PolicyEvaluator:
         final_decision_type = selected_effect.to_decision_type()
         obligations: List[str] = []
 
-        # Check approval token or supervision override
-        if final_decision_type in (AuthorizationDecisionType.REQUIRE_APPROVAL, AuthorizationDecisionType.REQUIRE_SUPERVISION):
-            if context.approval_token:
+        # A token string is not approval. PolicyEngine fulfills REQUIRE_APPROVAL
+        # only after the token resolves to a matching grant. Supervision remains
+        # a separate acknowledgment and is not satisfied by an approval token.
+        if final_decision_type == AuthorizationDecisionType.REQUIRE_APPROVAL:
+            obligations.append("SOLICIT_HUMAN_APPROVAL")
+        elif final_decision_type == AuthorizationDecisionType.REQUIRE_SUPERVISION:
+            if context.requires_supervision_acknowledged:
                 final_decision_type = AuthorizationDecisionType.ALLOW
-                match_reasons.append(f"Requirement fulfilled via approval token '{context.approval_token}' by approver '{context.approver_id or 'unknown'}'.")
-                obligations.append("LOG_APPROVAL_DISPATCH")
-            elif final_decision_type == AuthorizationDecisionType.REQUIRE_SUPERVISION:
-                if context.requires_supervision_acknowledged:
-                    final_decision_type = AuthorizationDecisionType.ALLOW
-                    match_reasons.append(f"Supervision requirement fulfilled; acknowledged by supervisor '{context.supervisor_id or 'unknown'}'.")
-                    obligations.append("LOG_SUPERVISED_EXECUTION")
-                else:
-                    obligations.append("SOLICIT_SUPERVISOR_ACKNOWLEDGMENT")
+                match_reasons.append(f"Supervision requirement fulfilled; acknowledged by supervisor '{context.supervisor_id or 'unknown'}'.")
+                obligations.append("LOG_SUPERVISED_EXECUTION")
             else:
-                obligations.append("SOLICIT_HUMAN_APPROVAL")
+                obligations.append("SOLICIT_SUPERVISOR_ACKNOWLEDGMENT")
 
         if final_decision_type == AuthorizationDecisionType.ALLOW:
             obligations.append("RECORD_EXECUTION_JOURNAL")

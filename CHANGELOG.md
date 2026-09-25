@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Adversarial Authority Probe & Security Contract Hardening v0.2
+- **Approval records**: `approval_granted=True` and an arbitrary `approval_token` are not authorization. `PolicyEngine.request_approval` issues a record bound to the case, capability, version, scope, and requester. Expired, mismatched, self-approved, and unknown tokens do not execute. A lead who is not the proposer still can.
+- **Entity identity**: an entity is `(type, name)`. Same type and name updates one record. A different type with the same name coexists across the case, replay, branch, correlation, snapshot, and knowledge graph. Name-only historical indexes are migrated explicitly and are not treated as if the missing type had been stored.
+- **Provisional high-impact denial**: default policy `1.1.0` adds `R007-DENY-PROVISIONAL-HIGH-IMPACT`. Approval does not make provisional consequential or destructive execution trusted. Untrusted and revoked capabilities remain blocked by capability validation. Provisional reversible behavior is unchanged.
+- **Tests**: 8 new probe regressions. Full suite is 507 passed. Tests that treated `approval_granted=True` as sufficient now require an issued approval record.
+
 ### Added - Authority Boundary Hardening & Contract Unification v0.1
 - **`cyberclaw/authority/`**: Explicit contract for resolution, provider outcomes, recovery disposition, lease ownership, semantic versions, and persistence document classes. It does not authorize, execute, persist, or replay.
 - **No silent inheritance**: specialist advertisement, provider registration, and queued capability ids no longer create capability authority. Core execution and requirement fulfillment use the registered capability, then lifecycle, trust, permission, and policy, before dispatch.

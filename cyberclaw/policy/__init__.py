@@ -28,6 +28,7 @@ from cyberclaw.policy.errors import (
 from cyberclaw.policy.evaluator import PolicyEvaluator
 from cyberclaw.policy.models import (
     ActorRole,
+    ApprovalGrant,
     AuthorizationDecision,
     AuthorizationDecisionType,
     Policy,
@@ -62,6 +63,7 @@ __all__ = [
     "RiskFactor",
     "RiskLevel",
     "ActorRole",
+    "ApprovalGrant",
     "PolicyValidationRecord",
     "PolicyError",
     "PolicyNotFoundError",

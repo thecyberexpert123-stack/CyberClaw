@@ -15,6 +15,7 @@ from cyberclaw.knowledge.models import (
 )
 from cyberclaw.knowledge.nodes import KnowledgeNode
 from cyberclaw.knowledge.provenance import KnowledgeProvenanceRecord
+from cyberclaw.types import entity_storage_key
 
 
 class KnowledgeMaterializer:
@@ -124,6 +125,30 @@ class KnowledgeMaterializer:
                     timestamp=ev.timestamp,
                 )
                 graph.attach_provenance(prov_rec)
+
+        # 1b. Materialize case entities. Identity is type plus name, so two
+        # entities that share a display name remain distinct nodes.
+        case_entities = sorted(
+            getattr(investigation, "entities", {}).values(),
+            key=lambda ent: (ent.type, ent.name, ent.id),
+        )
+        for ent in case_entities:
+            ent_node_id = f"entity:{entity_storage_key(ent.type, ent.name)}"
+            if graph.get_node(ent_node_id):
+                continue
+            case_ent_node = KnowledgeNode(
+                node_id=ent_node_id,
+                node_type=KnowledgeNodeType.ENTITY.value,
+                label=ent.name,
+                created_at=ent.first_seen,
+                valid_from=ent.first_seen,
+                investigation_id=investigation.id,
+                case_id=getattr(investigation, "case_id", ""),
+                is_counterfactual=graph.is_counterfactual,
+                branch_id=graph.branch_id,
+                metadata={"subject": ent.name, "entity_type": ent.type, "entity_id": ent.id},
+            ).seal()
+            graph.add_node(case_ent_node)
 
         # 2. Materialize Hypotheses
         hypotheses = sorted(

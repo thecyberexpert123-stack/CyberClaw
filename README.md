@@ -511,7 +511,7 @@ Execution Decision & Journal Audit Trail
   * Policies are immutable once registered. Supports explicit version targeting (`policy_id@version`).
   * Isolated, read-only policy snapshots protect counterfactual branches from modifying authoritative root governance.
 * **Human / Lead Approval & Supervision Workflows**:
-  * `REQUIRE_APPROVAL`: High-risk or destructive actions halt until an authorized human or lead investigator submits an explicit approval token (`request_approval`).
+  * `REQUIRE_APPROVAL`: High-risk or destructive actions halt until an authorized human or lead investigator issues an approval record (`request_approval`). The token only looks up that record. A caller boolean or an arbitrary string is not approval, and the proposer cannot approve their own request.
   * `REQUIRE_SUPERVISION`: Consequential actions by analysts require operational supervision acknowledgment (`acknowledge_supervision`).
 * **Tamper-Evident Audit Trail**:
   * Every authorization request, risk assessment, and decision outcome is recorded in the immutable Case Journal (`AUTHORIZATION_REQUESTED`, `RISK_ASSESSED`, `AUTHORIZATION_GRANTED`, `AUTHORIZATION_DENIED`, `APPROVAL_REQUESTED`, `AUTHORIZATION_DEFERRED`) and execution history records.
@@ -861,7 +861,25 @@ Replay can still resolve evidence by id from the current store, so a later mutat
 
 ---
 
-## 19. Running the Tests
+## 19. Adversarial Authority Probe & Security Contract Hardening v0.2
+
+Three invariants were attacked through the real APIs, with a simulated provider only.
+
+### Approval
+An approval is a record issued by `PolicyEngine.request_approval`, not a boolean and not a caller-chosen string. The execution path is `approval token → approval record → validation → authorization`. The record is bound to the case, capability id, capability version, scope, and requester. It expires when it says it expires. The proposer cannot approve it. An analyst cannot approve it. A lead who is not the proposer still can. `execute_action(..., approval_granted=True)` does not mint a token.
+
+### Entity identity
+An entity is `(type, name)`. `domain/example.com` and `organization/example.com` are different entities. The same type and name updates one record. Replay, branch simulation, correlation, snapshots, and knowledge materialization use that identity. A stored name-only index is migrated from the entity object and resealed. The migration does not recreate an entity the old index had already overwritten. A migration that would collapse two different entities raises `EntityIdentityError`.
+
+### Provisional trust
+`UNTRUSTED` and `REVOKED` are still rejected by capability validation before policy. `PROVISIONAL` remains executable at that gate. Policy `1.1.0` rule `R007-DENY-PROVISIONAL-HIGH-IMPACT` denies provisional consequential and destructive execution. A matching approval record does not override that denial. Provisional reversible execution keeps the existing fail-closed default. Trusted consequential and destructive paths stay policy-dependent: supervision or a real approval, not a new blanket denial.
+
+### What the probes found
+The boolean and an arbitrary token did execute a simulated destructive action before the fix. Name-only storage did drop the first entity. Provisional consequential and destructive execution did run when a token was treated as approval. Untrusted and revoked execution did not run, and that boundary was left alone.
+
+---
+
+## 20. Running the Tests
 
 Install dependencies and run the test suite:
 

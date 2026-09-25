@@ -9,7 +9,7 @@ into the Core itself.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from uuid import uuid4
 from pydantic import BaseModel, Field
 
@@ -40,6 +40,81 @@ class Entity(BaseModel):
     first_seen: datetime = Field(default_factory=utc_now)
     last_seen: datetime = Field(default_factory=utc_now)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# Unit separator keeps type and name from colliding when either contains ':'.
+_ENTITY_KEY_SEPARATOR = "\x1f"
+
+
+class EntityIdentityError(ValueError):
+    """Raised when an entity index cannot be migrated without collapsing two identities."""
+
+
+def entity_storage_key(entity_type: str, name: str) -> str:
+    """Canonical storage identity for an entity: type plus name, not name alone."""
+
+    def _escape(value: str) -> str:
+        return str(value).replace("\\", "\\\\").replace(_ENTITY_KEY_SEPARATOR, "\\x1f")
+
+    return f"{_escape(entity_type)}{_ENTITY_KEY_SEPARATOR}{_escape(name)}"
+
+
+def remember_entity(entities: Dict[str, Entity], entity: Entity) -> str:
+    """Store `entity` under its canonical identity and drop a stale alias of the same id.
+
+    A later record with the same type and name replaces that identity. A different
+    type with the same name occupies a different key and is left in place.
+    """
+    key = entity_storage_key(entity.type, entity.name)
+    entities[key] = entity
+    for stale in [k for k, stored in entities.items() if k != key and stored is not None and stored.id == entity.id]:
+        del entities[stale]
+    return key
+
+
+def has_entity(
+    entities: Mapping[str, Entity],
+    name: str,
+    entity_type: Optional[str] = None,
+) -> bool:
+    """Return whether the index already contains this name, optionally of this type."""
+    if entity_type is not None:
+        key = entity_storage_key(entity_type, name)
+        stored = entities.get(key)
+        if stored is not None and stored.type == entity_type and stored.name == name:
+            return True
+    for stored in entities.values():
+        if stored is None:
+            continue
+        if stored.name == name and (entity_type is None or stored.type == entity_type):
+            return True
+    return False
+
+
+def normalize_entity_index(entities: Mapping[str, Entity]) -> Dict[str, Entity]:
+    """Rekey an entity index to `(type, name)`.
+
+    Name-only historical keys are migrated from each entity's own type and name.
+    This does not invent an entity that a name-only index already overwrote.
+    Two different entities that would share one canonical key raise
+    `EntityIdentityError` instead of dropping one. Already-canonical indexes
+    are returned unchanged in content.
+    """
+    migrated: Dict[str, Entity] = {}
+    origin: Dict[str, str] = {}
+    ordered = sorted(entities.items(), key=lambda item: str(item[0]))
+    for old_key, stored in ordered:
+        if stored is None:
+            continue
+        new_key = entity_storage_key(stored.type, stored.name)
+        previous = migrated.get(new_key)
+        if previous is not None and previous.id != stored.id:
+            raise EntityIdentityError(
+                f"Entity index migration would collapse '{origin[new_key]}' and '{old_key}' into '{new_key}'."
+            )
+        migrated[new_key] = stored
+        origin[new_key] = str(old_key)
+    return migrated
 
 
 class Relationship(BaseModel):

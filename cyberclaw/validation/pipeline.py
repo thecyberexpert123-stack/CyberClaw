@@ -69,6 +69,7 @@ class ValidationPipeline:
         permission_manager: PermissionManager,
         scope: ActionScope = ActionScope.REVERSIBLE,
         approval_granted: bool = False,
+        approval_delegated: bool = False,
     ) -> None:
         """Validate that actor has all required permissions for this capability."""
         for perm in capability.required_permissions:
@@ -78,6 +79,7 @@ class ValidationPipeline:
                 required_permission=perm,
                 scope=scope,
                 approval_granted=approval_granted,
+                approval_delegated=approval_delegated,
             )
             if not allowed:
                 raise PolicyValidationError(
@@ -144,6 +146,7 @@ class ValidationPipeline:
         scope: ActionScope = ActionScope.REVERSIBLE,
         approval_granted: bool = False,
         policy_decision: Optional[Any] = None,
+        approval_delegated: bool = False,
     ) -> None:
         """Execute the full pre-execution validation pipeline."""
         # 0. Lifecycle & Trust Validation
@@ -156,7 +159,14 @@ class ValidationPipeline:
         # 2. Schema Validation
         cls.validate_schema(capability, parameters)
         # 3. Permission Validation
-        cls.validate_permissions(capability, actor, permission_manager, scope, approval_granted)
+        cls.validate_permissions(
+            capability,
+            actor,
+            permission_manager,
+            scope,
+            approval_granted,
+            approval_delegated=approval_delegated,
+        )
         # 4. Policy Authorization Validation
         if policy_decision is not None:
             cls.validate_authorization(policy_decision)

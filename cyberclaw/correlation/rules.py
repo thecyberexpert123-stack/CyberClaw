@@ -6,7 +6,19 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple
 from cyberclaw.correlation.models import ContradictionRecord, CorrelationProvenance
 from cyberclaw.evidence.models import Evidence
-from cyberclaw.types import Entity, Relationship
+from cyberclaw.types import Entity, Relationship, has_entity
+
+
+def _entity_absent(
+    existing: Dict[str, Entity],
+    pending: List[Entity],
+    name: str,
+    entity_type: str,
+) -> bool:
+    """True when neither the case index nor this rule's new entities already have this identity."""
+    if has_entity(existing, name, entity_type):
+        return False
+    return not any(entity.type == entity_type and entity.name == name for entity in pending)
 
 
 class CorrelationRule(ABC):
@@ -62,7 +74,7 @@ class DnsResolutionCorrelationRule(CorrelationRule):
                     records = ev.value["records"]
 
             # Add domain entity if not existing
-            if domain not in existing_entities and not any(e.name == domain for e in new_entities):
+            if _entity_absent(existing_entities, new_entities, domain, "domain"):
                 new_entities.append(
                     Entity(type="domain", name=domain, attributes={"source": "dns_evidence"})
                 )
@@ -71,7 +83,7 @@ class DnsResolutionCorrelationRule(CorrelationRule):
                 ip_list = records.get(rtype, [])
                 for ip in ip_list:
                     # Add IP entity
-                    if ip not in existing_entities and not any(e.name == ip for e in new_entities):
+                    if _entity_absent(existing_entities, new_entities, ip, "ip"):
                         new_entities.append(Entity(type="ip", name=ip, attributes={"address": ip}))
 
                     domain_rtype_ip_map.setdefault((domain, rtype), []).append((ip, ev.id))
@@ -135,7 +147,7 @@ class CertificateIdentityCorrelationRule(CorrelationRule):
             val = ev.value if isinstance(ev.value, dict) else {}
             cert_name = val.get("serial_number") or f"cert:{ev.subject}"
 
-            if cert_name not in existing_entities and not any(e.name == cert_name for e in new_entities):
+            if _entity_absent(existing_entities, new_entities, cert_name, "certificate"):
                 new_entities.append(
                     Entity(
                         type="certificate",
@@ -150,7 +162,7 @@ class CertificateIdentityCorrelationRule(CorrelationRule):
             # Link certificate to subject and all SANs
             sans = val.get("sans", [ev.subject])
             for san in sans:
-                if san not in existing_entities and not any(e.name == san for e in new_entities):
+                if _entity_absent(existing_entities, new_entities, san, "domain"):
                     new_entities.append(Entity(type="domain", name=san, attributes={"discovered_via": "cert_san"}))
 
                 prov = CorrelationProvenance(
@@ -199,7 +211,7 @@ class NetworkServiceCorrelationRule(CorrelationRule):
             ports = val.get("open_ports", [])
             for port in ports:
                 service_entity_name = f"{ip}:{port}"
-                if service_entity_name not in existing_entities and not any(e.name == service_entity_name for e in new_entities):
+                if _entity_absent(existing_entities, new_entities, service_entity_name, "service"):
                     new_entities.append(
                         Entity(
                             type="service",

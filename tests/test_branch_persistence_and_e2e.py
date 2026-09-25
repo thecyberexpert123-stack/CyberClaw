@@ -114,13 +114,13 @@ def test_section_23_end_to_end_branching_and_counterfactual_scenario(tmp_path: P
     recon_a_1 = inv.replay_branch(branch_a.branch_id)
     assert recon_a_1.hypotheses[hyp.id].status == "SUPPORTED"
     assert recon_a_1.hypotheses[hyp.id].confidence == 0.85
-    assert "c2.apex-defense.org" in recon_a_1.entities
+    assert any(entity.name == "c2.apex-defense.org" for entity in recon_a_1.entities.values())
 
     # 8. Replay Branch B
     recon_b_1 = inv.replay_branch(branch_b.branch_id)
     assert recon_b_1.hypotheses[hyp.id].status == "CONTRADICTED"
     assert recon_b_1.hypotheses[hyp.id].confidence == 0.15
-    assert "c2.apex-defense.org" not in recon_b_1.entities
+    assert not any(entity.name == "c2.apex-defense.org" for entity in recon_b_1.entities.values())
 
     # 9. Compare Branch A vs Branch B
     comp_ab = inv.compare_branches(branch_a.branch_id, branch_b.branch_id)
@@ -138,7 +138,7 @@ def test_section_23_end_to_end_branching_and_counterfactual_scenario(tmp_path: P
     # 11. Verify authoritative case remains unchanged
     assert inv.hypotheses[hyp.id].status == "OPEN"
     assert inv.hypotheses[hyp.id].confidence == 0.50
-    assert "c2.apex-defense.org" not in inv.entities
+    assert not any(entity.name == "c2.apex-defense.org" for entity in inv.entities.values())
     assert len(inv.evidence_store.list_all()) == 1
 
     # 12. Persist to workspace

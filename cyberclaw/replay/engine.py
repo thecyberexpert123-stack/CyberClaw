@@ -27,7 +27,7 @@ from cyberclaw.replay.errors import (
 )
 from cyberclaw.replay.models import ReconstructedState, ReplayReport
 from cyberclaw.replay.validator import HistoryValidator
-from cyberclaw.types import Entity, Hypothesis, Relationship
+from cyberclaw.types import Entity, Hypothesis, Relationship, normalize_entity_index, remember_entity
 
 
 class ReplayEngine:
@@ -135,7 +135,9 @@ class ReplayEngine:
                 for e in all_evidence
                 if e.id in snap_match.evidence_ids
             ]
-            entities = {k: v.model_copy(deep=True) for k, v in snap_match.entities.items()}
+            entities = normalize_entity_index(
+                {k: v.model_copy(deep=True) for k, v in snap_match.entities.items()}
+            )
             relationships = [r.model_copy(deep=True) for r in snap_match.relationships]
             hypotheses = {k: v.model_copy(deep=True) for k, v in snap_match.hypotheses.items()}
             requirements = {k: v.model_copy(deep=True) for k, v in snap_match.information_requirements.items()}
@@ -236,7 +238,7 @@ class ReplayEngine:
             elif etype == JournalEntryType.CORRELATION_COMPLETED:
                 for ent_data in entry.details.get("entities", []):
                     ent = Entity(**ent_data) if isinstance(ent_data, dict) else ent_data
-                    entities[ent.name] = ent.model_copy(deep=True)
+                    remember_entity(entities, ent.model_copy(deep=True))
                 for rel_data in entry.details.get("relationships", []):
                     rel = Relationship(**rel_data) if isinstance(rel_data, dict) else rel_data
                     if not any(r.id == rel.id for r in relationships):
@@ -246,7 +248,7 @@ class ReplayEngine:
                 ent_data = entry.details.get("entity")
                 if ent_data:
                     ent = Entity(**ent_data) if isinstance(ent_data, dict) else ent_data
-                    entities[ent.name] = ent.model_copy(deep=True)
+                    remember_entity(entities, ent.model_copy(deep=True))
 
             elif etype == JournalEntryType.RELATIONSHIP_ADDED:
                 rel_data = entry.details.get("relationship")

@@ -11,7 +11,7 @@ from cyberclaw.dfa.machine import CoreDFA
 from cyberclaw.dfa.states import CoreState
 from cyberclaw.evidence.store import EvidenceStore
 from cyberclaw.memory.memory import MemoryStore
-from cyberclaw.types import Entity, Hypothesis, Relationship
+from cyberclaw.types import Entity, Hypothesis, Relationship, entity_storage_key, remember_entity
 from cyberclaw.coordination.requirements import InformationRequirement
 from cyberclaw.correlation.models import ContradictionRecord
 
@@ -69,16 +69,31 @@ class Investigation(BaseModel):
         return self.dfa.current_state
 
     def add_entity(self, type: str, name: str, attributes: Optional[Dict[str, Any]] = None) -> Entity:
-        """Add or update an Entity in the investigation."""
-        for existing in self.entities.values():
-            if existing.type == type and existing.name == name:
-                if attributes:
-                    existing.attributes.update(attributes)
-                existing.last_seen = utc_now()
-                return existing
+        """Add or update an Entity in the investigation.
+
+        Identity is `(type, name)`. A second type with the same name is a
+        different entity. The same type and name updates the existing record.
+        """
+        key = entity_storage_key(type, name)
+        existing = self.entities.get(key)
+        if existing is None or existing.type != type or existing.name != name:
+            existing = next(
+                (
+                    stored
+                    for stored in self.entities.values()
+                    if stored is not None and stored.type == type and stored.name == name
+                ),
+                None,
+            )
+        if existing is not None:
+            if attributes:
+                existing.attributes.update(attributes)
+            existing.last_seen = utc_now()
+            remember_entity(self.entities, existing)
+            return existing
 
         entity = Entity(type=type, name=name, attributes=attributes or {})
-        self.entities[name] = entity
+        remember_entity(self.entities, entity)
         self.record_journal_entry(
             entry_type="CORRELATION_COMPLETED",
             summary=f"Entity added: {name} ({type})",
