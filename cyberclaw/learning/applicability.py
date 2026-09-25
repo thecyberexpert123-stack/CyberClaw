@@ -14,6 +14,7 @@ from cyberclaw.learning.models import (
     StrategyCandidate,
     StrategyLifecycle,
     StrategyQueryResult,
+    semver_key,
 )
 from cyberclaw.learning.normalization import objective_tokens
 
@@ -130,7 +131,7 @@ class ApplicabilityEngine:
         policy_decision_ids = policy_decision_ids or {}
         candidates: List[StrategyCandidate] = []
         excluded: List[Dict[str, Any]] = []
-        ordered = sorted(strategies, key=lambda item: (item.strategy_id, item.version))
+        ordered = sorted(strategies, key=lambda item: (item.strategy_id, semver_key(item.version)))
         for strategy in ordered:
             if strategy.lifecycle_state != StrategyLifecycle.AVAILABLE:
                 excluded.append(

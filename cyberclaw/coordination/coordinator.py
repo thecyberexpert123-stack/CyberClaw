@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
 if TYPE_CHECKING:
     from cyberclaw.investigation import Investigation
 
-from cyberclaw.capabilities.provider import ExecutionContext
 from cyberclaw.capabilities.registry import CapabilityRegistry
 from cyberclaw.coordination.requirements import (
     InformationRequirement,
@@ -20,7 +19,6 @@ from cyberclaw.correlation.engine import CorrelationEngine, CorrelationResult
 from cyberclaw.events.bus import EventBus
 from cyberclaw.events.event import Event
 from cyberclaw.evidence.result import ExecutionStatus
-from cyberclaw.specialists.endpoint import SpecialistRequest
 from cyberclaw.specialists.registry import SpecialistRegistry
 from cyberclaw.types import Hypothesis
 
@@ -38,6 +36,7 @@ class InvestigationCoordinator:
         self.specialists = specialists
         self.capabilities = capabilities
         self.event_bus = event_bus
+        self.governed_executor: Optional[Callable[..., Any]] = None
         self.correlation_engine = correlation_engine or CorrelationEngine()
         self.router = RequirementRouter(specialists, capabilities)
 
@@ -96,6 +95,7 @@ class InvestigationCoordinator:
         investigation: Investigation,
         requirement_id: str,
         parameters: Optional[Dict[str, Any]] = None,
+        actor: str = "core.system",
     ) -> InformationRequirement:
         """Resolve, dispatch, and fulfill an InformationRequirement via an eligible Specialist."""
         req = investigation.information_requirements.get(requirement_id)
@@ -136,26 +136,28 @@ class InvestigationCoordinator:
             )
         )
 
-        # 2. Prepare and dispatch SpecialistRequest
+        # 2. Route into the governed executor. Coordination does not invoke
+        # the specialist endpoint itself: registration, lifecycle, trust,
+        # permission, and policy are not optional because a specialist exists.
+        if self.governed_executor is None:
+            raise RuntimeError(
+                "Requirement fulfillment has no governed executor. "
+                "Coordination must not invoke a specialist directly."
+            )
         req_params = dict(parameters or {})
-        # Ensure target parameter is populated if expected by capability
         if "target" not in req_params:
             req_params["target"] = req.target_or_entity
         if "target_ip" not in req_params and "." in req.target_or_entity:
             req_params["target_ip"] = req.target_or_entity
 
-        spec_request = SpecialistRequest(
+        result = self.governed_executor(
             investigation_id=investigation.id,
             capability_id=cap_id,
-            action="execute",
             parameters=req_params,
-            context=ExecutionContext(
-                investigation_id=investigation.id,
-                correlation_id=investigation.id,
-                actor="core.coordinator",
-            ),
+            actor=actor,
+            target_specialist_id=specialist.id,
+            requirement_id=req.id,
         )
-
         self.event_bus.publish(
             Event(
                 type="specialist.invoked",
@@ -165,24 +167,10 @@ class InvestigationCoordinator:
             )
         )
 
-        # Execute through contract boundary
-        spec_response = specialist.endpoint.invoke(spec_request)
-        result = spec_response.result
-
-        # 3. Process Execution Result
+        # 3. Process Execution Result. Evidence ingestion belongs to the executor.
         if result.status == ExecutionStatus.SUCCESS:
             req.status = RequirementStatus.SATISFIED
-            ev_ids = []
-            for ev in result.evidence:
-                if not ev.provenance.investigation_id:
-                    ev.provenance.investigation_id = investigation.id
-                if not ev.provenance.specialist_id:
-                    ev.provenance.specialist_id = specialist.id
-                if not ev.provenance.capability_id:
-                    ev.provenance.capability_id = cap_id
-                investigation.evidence_store.add(ev)
-                ev_ids.append(ev.id)
-
+            ev_ids = [ev.id for ev in result.evidence]
             req.resulting_evidence_ids = ev_ids
             req.updated_at = utc_now()
 

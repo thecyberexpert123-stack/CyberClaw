@@ -235,6 +235,12 @@ class ExecutionHistoryRecord(BaseModel):
     authorization_decision_id: Optional[str] = Field(default=None, description="ID of policy authorization decision")
     risk_level: Optional[str] = Field(default=None, description="Assessed risk level at execution time")
     policy_id: Optional[str] = Field(default=None, description="Policy evaluated for this execution")
+    policy_version: Optional[str] = Field(default=None, description="Recorded policy version, not the current latest")
+    decision: Optional[str] = Field(default=None, description="Recorded authorization decision")
+    actor: Optional[str] = Field(default=None, description="Actor the authorization was evaluated for")
+    task_id: Optional[str] = Field(default=None, description="Runtime task id when execution was queued")
+    provider_outcome: Optional[str] = Field(default=None, description="Classified provider outcome, not exception text")
+    investigation_id: Optional[str] = Field(default=None, description="Case the execution belonged to")
     status: str
     duration_ms: Optional[float] = None
     evidence_count: int = 0

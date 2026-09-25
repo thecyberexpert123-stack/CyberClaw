@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from typing import Dict, List, Optional
+from cyberclaw.authority.versions import semantic_version_key
 from cyberclaw.policy.errors import PolicyNotFoundError, PolicyValidationError
 from cyberclaw.policy.models import Policy, PolicyEffect
 from cyberclaw.policy.rules import create_standard_rules
@@ -15,13 +16,7 @@ DEFAULT_POLICY_VERSION = "1.0.0"
 
 def _semantic_version_key(version: str) -> tuple:
     """Order policy versions numerically so 1.10.0 is newer than 1.9.0."""
-    parts = []
-    for piece in version.split("."):
-        try:
-            parts.append((0, int(piece)))
-        except ValueError:
-            parts.append((1, piece))
-    return tuple(parts)
+    return semantic_version_key(version)
 
 
 class PolicyRegistry:

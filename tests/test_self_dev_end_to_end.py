@@ -25,6 +25,7 @@ Invoked by Core through SpecialistEndpoint!
 from pathlib import Path
 import pytest
 
+from cyberclaw.capabilities.capability import Capability
 from cyberclaw.capabilities.provider import ExecutionContext
 from cyberclaw.core import CyberClawCore
 from cyberclaw.evidence.models import Evidence
@@ -180,8 +181,17 @@ def test_complete_self_development_lifecycle(tmp_path: Path):
     promoted_capability_id = f"osint.skill:{trusted_skill.skill_id}"
     assert promoted_capability_id in specialist.list_capabilities()
 
-    # Re-register updated capability manifest with Core
+    # Re-register updated capability manifest with Core.
+    # The manifest is a proposal. It does not register or trust the capability.
     core.register_specialist(specialist.as_specialist())
+    core.register_capability(
+        Capability(
+            id=promoted_capability_id,
+            name=promoted_capability_id,
+            category="osint",
+            provenance="PROMOTED_SKILL",
+        )
+    )
 
     # -------------------------------------------------------------------------
     # 12. Core Invokes Newly Trusted Skill via SpecialistEndpoint

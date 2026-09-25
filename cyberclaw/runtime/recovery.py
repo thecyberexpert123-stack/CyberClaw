@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from cyberclaw.authority.models import RecoveryDisposition
+from cyberclaw.authority.recovery import recovery_disposition
 from cyberclaw.runtime.idempotency import IdempotencyRegistry
 from cyberclaw.runtime.models import (
     ExecutionState,
@@ -51,16 +53,21 @@ class RuntimeRecoveryManager:
         for task in queue.list_tasks():
             if task.status not in cls._CLAIMED:
                 continue
-            if (
-                task.status in (TaskStatus.VALIDATING, TaskStatus.AUTHORIZED, TaskStatus.DISPATCHED)
-                and task.execution_state == ExecutionState.UNSTARTED
-            ):
+            existing = idempotency.get_existing_execution(task.idempotency_key)
+            disposition = recovery_disposition(
+                action_scope=task.action_scope,
+                execution_state=task.execution_state,
+                task_status=task.status,
+                has_execution_record=existing is not None,
+                retries_remaining=task.retry_count < task.retry_policy.max_retries,
+            )
+            if disposition == RecoveryDisposition.REQUEUE_UNSTARTED:
                 task.claimed_by_worker = None
                 task.claim_expires_at = None
                 task.status = TaskStatus.QUEUED
                 report.requeued_unstarted.append(task.task_id)
                 continue
-            cls._reconcile_interrupted(task, queue, idempotency, report)
+            cls._reconcile_interrupted(task, queue, idempotency, report, disposition, existing)
         return report
 
     @classmethod
@@ -70,20 +77,21 @@ class RuntimeRecoveryManager:
         queue: DurableTaskQueue,
         idempotency: IdempotencyRegistry,
         report: RecoveryReport,
+        disposition: RecoveryDisposition,
+        existing,
     ) -> None:
         """Close an interrupted attempt without inventing a provider result."""
-        existing = idempotency.get_existing_execution(task.idempotency_key)
-        if existing and task.status == TaskStatus.RUNNING:
+        if disposition == RecoveryDisposition.RECONCILE_COMPLETED and existing:
             task.execution_state = ExecutionState.COMPLETED
             queue.ack(task.task_id, result=existing.get("result"))
             report.reconciled_completed.append(task.task_id)
             return
 
-        task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
         task.claimed_by_worker = None
         task.claim_expires_at = None
 
-        if existing and task.status != TaskStatus.RUNNING:
+        if disposition == RecoveryDisposition.PRESERVE_UNKNOWN and existing:
+            task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
             queue.fail(
                 task.task_id,
                 "Execution record exists but the acknowledgement boundary was not reached",
@@ -93,14 +101,14 @@ class RuntimeRecoveryManager:
             report.flagged_unknown.append(task.task_id)
             return
 
-        is_safe_scope = task.action_scope.lower() in ("read_only", "informational", "reversible")
-        if is_safe_scope and task.retry_count < task.retry_policy.max_retries:
+        if disposition == RecoveryDisposition.GOVERNED_REVERSIBLE_RETRY:
             queue.fail(
                 task.task_id,
                 "Worker crashed during in-flight execution",
                 failure_type="WORKER_CRASH",
             )
             # The interrupted attempt is closed. The retry is a new unstarted attempt.
+            # This is existing reversible governance, not an inference from failure timing.
             task.execution_state = ExecutionState.UNSTARTED
             if queue.schedule_retry(task.task_id):
                 report.retried_reversible.append(task.task_id)

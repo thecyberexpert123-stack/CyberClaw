@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+from cyberclaw.authority.models import PersistenceDocumentState
 from cyberclaw.runtime.errors import PersistenceError
 from cyberclaw.runtime.idempotency import IdempotencyRegistry
 from cyberclaw.runtime.models import RuntimeTask
@@ -86,16 +87,12 @@ class RuntimePersistenceManager:
         idemp_file = runtime_dir / "idempotency.json"
         digest_file = runtime_dir / "digest.json"
 
-        if not queue_file.exists():
+        present = [path.exists() for path in (queue_file, idemp_file, digest_file)]
+        if not any(present):
             return False
-        if not idemp_file.exists():
+        if not all(present):
             raise PersistenceError(
-                "Idempotency record is missing while a runtime queue exists. Refusing to load.",
-                corruption_class="MISSING_RECORD",
-            )
-        if not digest_file.exists():
-            raise PersistenceError(
-                "Runtime digest is missing. Refusing to treat unverified history as valid.",
+                "Runtime persistence is partial. Refusing to treat a missing companion record as an empty queue.",
                 corruption_class="MISSING_RECORD",
             )
 
@@ -137,3 +134,43 @@ class RuntimePersistenceManager:
         queue.import_state([task.model_dump(mode="json") for task in parsed])
         idempotency.import_state(idemp_data)
         return True
+
+    @classmethod
+    def classify_directory(cls, base_dir: Path) -> tuple[str, str]:
+        """Classify a runtime directory without importing it.
+
+        MISSING, EMPTY_VALID, POPULATED_VALID, PARTIAL, and CORRUPT are distinct.
+        An empty file is corruption, not a valid empty document.
+        """
+        runtime_dir = base_dir / "runtime"
+        queue_file = runtime_dir / "queue.json"
+        idemp_file = runtime_dir / "idempotency.json"
+        digest_file = runtime_dir / "digest.json"
+        present = [path for path in (queue_file, idemp_file, digest_file) if path.exists()]
+        if not present:
+            return PersistenceDocumentState.MISSING.value, "no runtime persistence files"
+        if len(present) != 3:
+            return PersistenceDocumentState.PARTIAL.value, "companion runtime record is missing"
+        try:
+            queue_text = queue_file.read_text(encoding="utf-8")
+            idemp_text = idemp_file.read_text(encoding="utf-8")
+            queue_data = _read_json(queue_file)
+            idemp_data = _read_json(idemp_file)
+            digest_data = _read_json(digest_file)
+        except PersistenceError as exc:
+            return PersistenceDocumentState.CORRUPT.value, exc.corruption_class
+        if not isinstance(queue_data, list) or not isinstance(idemp_data, dict):
+            return PersistenceDocumentState.CORRUPT.value, "INVALID_SCHEMA"
+        if not isinstance(digest_data, dict) or "digest" not in digest_data:
+            return PersistenceDocumentState.CORRUPT.value, "INVALID_SCHEMA"
+        if _digest_texts(queue_text, idemp_text) != digest_data["digest"]:
+            return PersistenceDocumentState.CORRUPT.value, "DIGEST_MISMATCH"
+        for item in queue_data:
+            if not isinstance(item, dict) or not item.get("task_id") or not item.get("investigation_id"):
+                return PersistenceDocumentState.CORRUPT.value, "INVALID_SCHEMA"
+        populated = bool(queue_data) or any(
+            idemp_data.get(key) for key in ("seen_events", "event_keys", "authorizations", "executions")
+        )
+        if populated:
+            return PersistenceDocumentState.POPULATED_VALID.value, "digest matches populated runtime state"
+        return PersistenceDocumentState.EMPTY_VALID.value, "digest matches an empty runtime document"

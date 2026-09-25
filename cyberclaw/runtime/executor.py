@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
+from cyberclaw.authority.models import ProviderOutcome
+from cyberclaw.authority.outcomes import classify_provider_result, explicit_temporary_failure
+from cyberclaw.authority.resolution import execution_boundary
 from cyberclaw.capabilities.provider import ExecutionContext
 from cyberclaw.capabilities.registry import CapabilityRegistry
 from cyberclaw.case.models import JournalEntryType
@@ -22,11 +25,13 @@ from cyberclaw.policy.models import (
 from cyberclaw.runtime.dispatcher import SpecialistDispatcher
 from cyberclaw.runtime.errors import (
     BranchExecutionBlockedError,
+    DispatchError,
     ProviderExecutionError,
     RuntimeAuthorizationError,
     RuntimeResultValidationError,
     RuntimeTimeoutError,
     RuntimeValidationError,
+    UnknownExecutionStateError,
 )
 from cyberclaw.runtime.idempotency import IdempotencyRegistry
 from cyberclaw.runtime.models import (
@@ -92,8 +97,8 @@ class RuntimeExecutor:
             task.deadline = task.created_at + timedelta(seconds=task.timeout_seconds)
 
         if task.deadline and utc_now() > task.deadline:
+            task.metadata["provider_outcome"] = ProviderOutcome.TIMEOUT_BEFORE_EXECUTION.value
             self.queue.fail(task.task_id, "Deadline expired before execution started", failure_type="TIMEOUT")
-            TaskLifecycleDFA.transition(task, TaskStatus.TIMED_OUT, reason="Timeout before execution")
             raise RuntimeTimeoutError(
                 f"Task '{task.task_id}' timed out before execution.",
                 task_id=task.task_id,
@@ -109,15 +114,27 @@ class RuntimeExecutor:
                 f"Capability '{task.capability_id}' is not registered. Runtime will not create it.",
                 task_id=task.task_id,
                 investigation_id=task.investigation_id,
+                boundary="NOT_FOUND",
             )
 
-        executable, unexecutable_reason = capability.is_executable()
-        if not executable:
-            self.queue.reject(task.task_id, reason=unexecutable_reason)
+        boundary = execution_boundary(capability)
+        if boundary:
+            if boundary == "NOT_TRUSTED":
+                reason = (
+                    f"Capability '{capability.versioned_id}' has trust state "
+                    f"'{capability.trust_state.value}' and cannot be executed."
+                )
+            else:
+                reason = (
+                    f"Capability '{capability.versioned_id}' is in lifecycle state "
+                    f"'{capability.lifecycle_state.value}' and cannot be executed."
+                )
+            self.queue.reject(task.task_id, reason=reason)
             raise RuntimeValidationError(
-                f"Capability '{task.capability_id}' cannot be executed: {unexecutable_reason}",
+                reason,
                 task_id=task.task_id,
                 investigation_id=task.investigation_id,
+                boundary=boundary,
             )
 
         # 4. Contextual Policy Authorization Evaluation
@@ -145,17 +162,30 @@ class RuntimeExecutor:
         task.authorization_decision_id = auth_decision.decision_id
         task.risk_level = auth_decision.risk_assessment.overall_risk.value
         self.policy_engine.record_in_journal(auth_decision, investigation.case_manager)
-        self.idempotency.record_authorization(
-            task.idempotency_key,
-            {"decision_id": auth_decision.decision_id, "decision": auth_decision.decision.value},
-        )
+        authority_snapshot = {
+            "decision_id": auth_decision.decision_id,
+            "decision": auth_decision.decision.value,
+            "policy_id": auth_decision.policy_id,
+            "policy_version": auth_decision.policy_version,
+            "capability_id": capability.id,
+            "capability_version": capability.version,
+            "lifecycle_state": capability.lifecycle_state.value,
+            "trust_state": capability.trust_state.value,
+            "action_scope": scope_enum.value,
+            "actor": task.actor,
+            "investigation_id": task.investigation_id,
+            "task_id": task.task_id,
+        }
+        task.metadata["authority"] = authority_snapshot
+        self.idempotency.record_authorization(task.idempotency_key, authority_snapshot)
 
         if not auth_decision.is_authorized:
             if auth_decision.decision in (
                 AuthorizationDecisionType.REQUIRE_APPROVAL,
                 AuthorizationDecisionType.REQUIRE_SUPERVISION,
+                AuthorizationDecisionType.DEFER,
             ):
-                self.queue.defer(task.task_id, reason=f"Awaiting authorization approval ({auth_decision.decision.value})")
+                self.queue.defer(task.task_id, reason=f"Awaiting authorization ({auth_decision.decision.value})")
                 return task
             else:
                 reason_str = "; ".join(auth_decision.reasons)
@@ -217,8 +247,9 @@ class RuntimeExecutor:
         try:
             result, resolved_subsystem = self.dispatcher.dispatch(task, exec_ctx)
         except ProviderExecutionError as pee:
-            # An exception during dispatch does not prove the provider did not run.
+            # An exception that escaped dispatch does not prove the provider did not run.
             task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+            task.metadata["provider_outcome"] = ProviderOutcome.PROVIDER_EXECUTION_EXCEPTION.value
             self.queue.fail(
                 task.task_id,
                 pee.message,
@@ -226,13 +257,29 @@ class RuntimeExecutor:
             )
             raise
 
-        # The capability registry converts provider exceptions into failure results.
-        # That is not the same as a provider returning a known failure. Do not retry it.
-        if result.is_failure and result.error_code == "PROVIDER_EXECUTION_EXCEPTION":
+        # A deadline crossing after dispatch means invocation may have started.
+        # Do not treat that as a safe timeout, and do not ack the returned result.
+        if task.deadline and utc_now() > task.deadline:
+            task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+            task.metadata["provider_outcome"] = ProviderOutcome.TIMEOUT_WITH_UNKNOWN_EXECUTION.value
+            self.queue.fail(
+                task.task_id,
+                "Deadline exceeded after execution started; provider state unknown",
+                failure_type="UNKNOWN_EXECUTION_STATE",
+            )
+            raise UnknownExecutionStateError(
+                f"Task '{task.task_id}' timed out after execution started.",
+                task_id=task.task_id,
+                investigation_id=task.investigation_id,
+            )
+
+        outcome = classify_provider_result(result)
+        task.metadata["provider_outcome"] = outcome.value
+        if outcome in (ProviderOutcome.PROVIDER_EXECUTION_EXCEPTION, ProviderOutcome.UNKNOWN_EXECUTION_STATE):
             task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
             self.queue.fail(
                 task.task_id,
-                result.error or "Provider raised during execution; provider state unknown",
+                result.error or "Provider state unknown after invocation",
                 failure_type="UNKNOWN_EXECUTION_STATE",
             )
             raise ProviderExecutionError(
@@ -241,14 +288,26 @@ class RuntimeExecutor:
                 investigation_id=task.investigation_id,
                 is_retryable=False,
             )
-
-        # Check deadline exceeded during execution
-        if task.deadline and utc_now() > task.deadline:
-            task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
-            self.queue.fail(task.task_id, "Deadline exceeded during execution", failure_type="TIMEOUT")
-            TaskLifecycleDFA.transition(task, TaskStatus.TIMED_OUT, reason="Execution exceeded timeout")
-            raise RuntimeTimeoutError(
-                f"Task '{task.task_id}' exceeded deadline during execution.",
+        if outcome == ProviderOutcome.MALFORMED_RESULT:
+            task.execution_state = ExecutionState.COMPLETED
+            self.queue.fail(
+                task.task_id,
+                "Provider returned a malformed result",
+                failure_type="MALFORMED_RESULT",
+            )
+            raise RuntimeResultValidationError(
+                f"Malformed result from capability '{task.capability_id}'",
+                task_id=task.task_id,
+                investigation_id=task.investigation_id,
+            )
+        if outcome in (ProviderOutcome.PROVIDER_REJECTION, ProviderOutcome.VALIDATION_FAILURE):
+            task.execution_state = ExecutionState.UNSTARTED
+            failure_type = (
+                "VALIDATION_FAILURE" if outcome == ProviderOutcome.VALIDATION_FAILURE else "PROVIDER_REJECTION"
+            )
+            self.queue.fail(task.task_id, result.error or failure_type, failure_type=failure_type)
+            raise DispatchError(
+                f"Capability '{task.capability_id}' was not invoked: {result.error}",
                 task_id=task.task_id,
                 investigation_id=task.investigation_id,
             )
@@ -289,24 +348,32 @@ class RuntimeExecutor:
             error=result.error,
             lifecycle_state=capability.lifecycle_state.value,
             trust_state=capability.trust_state.value,
+            permission_scope=scope_enum.value,
             action_scope=scope_enum.value,
             authorization_decision_id=auth_decision.decision_id,
             risk_level=auth_decision.risk_assessment.overall_risk.value,
             policy_id=auth_decision.policy_id,
+            policy_version=auth_decision.policy_version,
+            decision=auth_decision.decision.value,
+            actor=task.actor,
+            task_id=task.task_id,
+            provider_id=resolved_subsystem,
+            provider_outcome=task.metadata.get("provider_outcome"),
+            investigation_id=task.investigation_id,
         )
 
         # Handle unsuccessful provider execution
-        if not result.is_success:
+        if not result.completed_normally:
             task.execution_state = ExecutionState.COMPLETED
             err_msg = result.error or "Provider returned failure status"
-            is_temp = "503" in err_msg or "temporary" in err_msg.lower() or "timeout" in err_msg.lower()
-            failure_type = "PROVIDER_TEMPORARY_FAILURE" if is_temp else "PROVIDER_FAILURE"
+            retryable = explicit_temporary_failure(result)
+            failure_type = "PROVIDER_TEMPORARY_FAILURE" if retryable else "PROVIDER_FAILURE"
             self.queue.fail(task.task_id, err_msg, failure_type=failure_type)
             raise ProviderExecutionError(
                 f"Execution failed on capability '{task.capability_id}': {err_msg}",
                 task_id=task.task_id,
                 investigation_id=task.investigation_id,
-                is_retryable=is_temp,
+                is_retryable=retryable,
             )
 
         # 10. Experience Recording

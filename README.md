@@ -40,6 +40,7 @@ CyberClaw/
 │   ├── dfa/                    # Deterministic Finite Automaton
 │   │   ├── states.py           # CoreState (INITIALIZE, READY, CLASSIFY, INVESTIGATE, VERIFY, RESOLVE, PAUSED, FAILED)
 │   │   └── machine.py          # CoreDFA engine with guard validation and rejection
+│   ├── authority/              # Authority contract: resolution, outcomes, recovery, versions
 │   ├── capabilities/           # Capabilities and Providers
 │   │   ├── capability.py       # Capability model
 │   │   ├── provider.py         # CapabilityProvider interface & ExecutionContext
@@ -165,7 +166,7 @@ CyberClaw/
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 447 unit & integration tests covering all requirements
+├── tests/                      # 499 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -795,14 +796,72 @@ Crash-at-boundary checks place a task at a named boundary and call the existing 
 * Provider exceptions that the capability registry converts into `PROVIDER_EXECUTION_EXCEPTION` are unknown execution, not a known temporary failure, and are not retried.
 
 ### Known Limitations
-`CyberClawCore.execute_action` can still materialize a capability object when a specialist advertises an unregistered capability id. That path is the original routing contract. Changing it would break existing specialist tests, so the durable runtime is the boundary that was corrected. Reversible worker crashes with no execution record are still retried by the existing recovery path after the interrupted attempt is closed. Consequential and destructive unknown states are not. The chaos harness does not simulate a real multi-process cluster, a real clock, or an external provider.
+The Core advertisement shortcut described here was closed by Authority Boundary Hardening. Reversible worker crashes with no execution record are still retried by the existing recovery path after the interrupted attempt is closed. Consequential and destructive unknown states are not. The chaos harness does not simulate a real multi-process cluster, a real clock, or an external provider.
 
 ### Intentionally Untested
 Real network partitions, real credential stores, distributed consensus, and offensive external actions are out of scope. The framework must not become a second policy engine, replay engine, or persistence system.
 
 ---
 
-## 18. Running the Tests
+## 18. Authority Boundary Hardening & Contract Unification v0.1
+
+No subsystem gains authority because another subsystem exposes an object, identifier, result, or path. `cyberclaw/authority/` records that contract. It does not authorize, execute, persist, or replay. Those remain the existing policy engine, runtime, persistence managers, and replay engine.
+
+### Authority Model
+A specialist proposes support. The planner proposes intent. Collaboration and coordination route. Capability governance owns lifecycle and trust. Policy authorizes. The runtime executes authorized work. Case state records the authority that was used. Replay reconstructs history. Branching simulates. Learning proposes strategy. Chaos validates. None of those layers inherits authority from the one beside it.
+
+`advertised ≠ registered ≠ authorized ≠ executable`. A specialist manifest, a provider object, and a queued capability id do not create a capability, grant trust, or skip policy.
+
+### Execution Contract
+Authoritative execution is `REQUEST → capability resolution → lifecycle → trust → permission → policy → runtime dispatch → provider`. A later stage does not run when an earlier boundary has already failed. An execution record retains capability id and version, provider, lifecycle, trust, permission scope, policy id and version, decision, actor, case, and task. It does not retain secrets.
+
+Requirement fulfillment uses that same executor. Coordination still chooses a specialist. It does not call the specialist endpoint itself.
+
+### Recovery
+Recovery does not infer safety from failure timing. The disposition comes from scope, execution progress, and whether an execution record exists:
+
+| Scope | Progress | Execution record | Disposition |
+| --- | --- | --- | --- |
+| any | claimed, unstarted | no | requeue; the provider was not entered |
+| any | running | yes | reconcile completed; do not call the provider again |
+| any | not running | yes | preserve unknown; acknowledgement was not reached |
+| reversible | in progress | no | close the attempt and retry as a new unstarted attempt |
+| consequential or destructive | in progress or unknown | no | preserve unknown; do not replay |
+
+The reversible retry is the existing recovery rule. It is not a new policy, and it is not inferred from how quickly the worker failed.
+
+### Provider Outcomes
+Outcomes are `SUCCESS`, `SUCCESS_EMPTY`, `KNOWN_FAILURE`, `VALIDATION_FAILURE`, `PROVIDER_REJECTION`, `PROVIDER_EXECUTION_EXCEPTION`, `TIMEOUT_BEFORE_EXECUTION`, `TIMEOUT_WITH_UNKNOWN_EXECUTION`, `MALFORMED_RESULT`, and `UNKNOWN_EXECUTION_STATE`. Classification uses the execution boundary and explicit error codes. The word "timeout" in an exception or message is not evidence that the provider did not run, and it is not permission to retry. A known temporary failure is the explicit code `PROVIDER_TEMPORARY_FAILURE`.
+
+### Specialist Declaration
+"I support X" is routing data. It does not mean X exists, is trusted, is authorized, or may execute. Legitimate routing is preserved once X is registered and executable: the runtime and Core still prefer a specialist that advertises the registered capability.
+
+### Policy Versions
+Every authoritative authorization records `policy_id` and `policy_version`. New execution uses the current policy. Latest means semantic order: `1.9.0 < 1.10.0 < 2.0.0`. Replay reads the recorded decision and the recorded policy reference. It does not call the current `PolicyEngine`. `ALLOW`, `DENY`, `REQUIRE_APPROVAL`, `REQUIRE_SUPERVISION`, and `DEFER` stay distinct across retry, reclaim, branch, replay, reroute, collaboration, and learning. An approval is for that request context. It is not a token another case can reuse.
+
+### Replay
+Replay reconstructs history. It does not call providers, execute capabilities, authorize against the current policy, create authoritative evidence, publish strategies, or mutate case state, capability trust, or policy. It does not open a network or a shell.
+
+### Persistence
+Durable runtime and collaboration state is `write → digest → atomic commit → reload → full validation`. The digest covers the persisted representation. `MISSING`, `EMPTY_VALID`, `POPULATED_VALID`, `PARTIAL`, and `CORRUPT` do not collapse. An empty file is corruption. A valid empty document is a digest-matching empty queue. A missing companion file is partial, not "no state". A branch index entry whose directory is missing raises `BranchIntegrityError`.
+
+### Error Taxonomy
+Callers can distinguish not found (`CapabilityNotFoundError`, runtime boundary `NOT_FOUND`), not trusted (`CapabilityTrustError`, boundary `NOT_TRUSTED`), not authorized (`AuthorizationDeniedError` and the approval, supervision, and defer errors), not executable (`CapabilityUnavailableError`, boundary `NOT_EXECUTABLE`), execution unknown (`UnknownExecutionStateError`), and history corrupt (`PersistenceError`, `ReplaySequenceError`, `CorruptedHistoryError`, `BranchIntegrityError`). Existing types are reused. `DEFER` is not folded into `DENY`.
+
+### Intentional Behavior
+* A reversible in-progress crash with no execution record is closed and retried as a new unstarted attempt.
+* A timeout observed before the provider is entered may be retried when the action is otherwise authorized.
+* Queueing an unregistered id does not register it. Execution rejects it.
+* The synchronous Core path returns a classified provider result and does not have a retry loop. Ambiguous invocation is recorded and is not treated as success.
+* Learning publication is the governed `APPROVED → AVAILABLE` transition. There is no separate `PUBLISHED` lifecycle state. A strategy is structured data, not a capability, permission, policy, or executable payload.
+* `PROMOTED` records a decision. It does not merge branch evidence into `CaseState`.
+
+### Remaining Limits
+Replay can still resolve evidence by id from the current store, so a later mutation of that object can appear in a historical reconstruction. `submit_task_to_runtime` still accepts an unregistered id into the queue; only execution rejects it. Lease expiry is simulated in-process, not by a real cluster clock. This milestone does not add providers, scanners, attack techniques, external integrations, or a second authorization system.
+
+---
+
+## 19. Running the Tests
 
 Install dependencies and run the test suite:
 

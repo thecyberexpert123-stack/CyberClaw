@@ -85,14 +85,11 @@ class CapabilityRegistry:
 
         Multiple providers can back the same capability with different priorities.
         """
-        if provider.capability_id not in self._capabilities:
-            # Auto-register a minimal capability stub if not explicitly declared
-            self.register_capability(
-                Capability(
-                    id=provider.capability_id,
-                    name=provider.name,
-                    description=f"Auto-registered capability for provider {provider.id}",
-                )
+        if self.get_capability(provider.capability_id) is None:
+            raise CapabilityNotFoundError(
+                f"Provider '{provider.id}' cannot create capability '{provider.capability_id}'. "
+                "Register the capability through governance before attaching a provider.",
+                capability_id=provider.capability_id,
             )
 
         providers = self._providers.setdefault(provider.capability_id, [])

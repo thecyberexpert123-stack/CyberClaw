@@ -23,8 +23,22 @@ class QueueError(RuntimeBaseError):
 
 
 class RuntimeValidationError(RuntimeBaseError):
-    """Raised when request payload or task structure violates runtime validation."""
-    pass
+    """Raised when request payload or task structure violates runtime validation.
+
+    ``boundary`` distinguishes not found, not trusted, and not executable
+    without a new exception family. Authorization failures remain
+    ``RuntimeAuthorizationError``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        task_id: Optional[str] = None,
+        investigation_id: Optional[str] = None,
+        boundary: str = "VALIDATION",
+    ) -> None:
+        super().__init__(message, task_id=task_id, investigation_id=investigation_id)
+        self.boundary = boundary
 
 
 class RuntimeAuthorizationError(RuntimeBaseError):

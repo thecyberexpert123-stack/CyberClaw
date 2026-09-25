@@ -3,6 +3,7 @@
 from pathlib import Path
 import pytest
 
+from cyberclaw.capabilities.capability import Capability
 from cyberclaw.coordination.requirements import (
     InformationRequirement,
     RequirementStatus,
@@ -78,6 +79,8 @@ def test_requirement_fulfillment_success(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(spec)
+    # Advertisement does not register the capability the requirement will execute.
+    core.register_capability(Capability(id="intel.query", name="Query"))
     inv = core.create_investigation(title="Fulfillment Test")
 
     req = core.create_information_requirement(
@@ -112,6 +115,7 @@ def test_requirement_fulfillment_empty_distinction(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(spec)
+    core.register_capability(Capability(id="intel.empty", name="Empty"))
     inv = core.create_investigation(title="Empty Test")
 
     req = core.create_information_requirement(
@@ -145,6 +149,7 @@ def test_requirement_fulfillment_failure_handling(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(spec)
+    core.register_capability(Capability(id="intel.fail", name="Fail"))
     inv = core.create_investigation(title="Failure Test")
 
     req = core.create_information_requirement(

@@ -28,6 +28,18 @@ from cyberclaw.types import Source
 from cyberclaw.validation.errors import SchemaValidationError
 
 
+def _register_governed_capability(core: CyberClawCore, capability_id: str) -> Capability:
+    """Advertisement is not registration.
+
+    Authority hardening closed the path that materialized a capability from a
+    specialist manifest. Tests that route to a specialist must register the
+    capability explicitly.
+    """
+    capability = Capability(id=capability_id, name=capability_id)
+    core.register_capability(capability)
+    return capability
+
+
 # --------------------------------------------------------------------------
 # Controlled Test Fixtures & Mocks
 # --------------------------------------------------------------------------
@@ -204,6 +216,7 @@ def test_req_06_request_can_be_routed_to_specialist(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "route.test")
     inv = core.create_investigation(title="Routing Test")
 
     result = core.execute_action(
@@ -252,6 +265,7 @@ def test_req_08_structured_evidence_object_can_be_produced(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "evidence.sample")
     inv = core.create_investigation(title="Evidence Test")
 
     result = core.execute_action(
@@ -285,6 +299,7 @@ def test_req_09_evidence_and_events_enter_core_communication_mechanism(tmp_path:
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "bus.action")
     inv = core.create_investigation(title="Bus Test")
 
     core.execute_action(
@@ -346,6 +361,7 @@ def test_req_12_experiences_are_recorded(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "exp.action")
     inv = core.create_investigation(title="Experience Test")
 
     core.execute_action(
@@ -376,6 +392,7 @@ def test_req_13_workspace_state_persists_correctly(tmp_path: Path):
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "persist.action")
     inv = core.create_investigation(title="Persistence Test")
 
     core.execute_action(
@@ -440,6 +457,7 @@ def test_req_15_failure_and_empty_result_states_remain_distinguishable(tmp_path:
         endpoint=endpoint,
     )
     core.register_specialist(specialist)
+    _register_governed_capability(core, "distinguish.action")
     inv = core.create_investigation(title="Distinction Test")
 
     # 1. Empty findings execution

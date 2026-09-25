@@ -112,6 +112,10 @@ def test_core_osint_workflow_execution(tmp_path: Path):
     for cap in get_osint_capabilities():
         core.register_capability(cap)
     core.register_specialist(osint_specialist.as_specialist())
+    # The workflow id is an advertisement. Execution still requires registration.
+    core.register_capability(
+        Capability(id="osint.workflow:domain_triage", name="Domain Passive Triage Workflow", category="osint")
+    )
 
     inv = core.create_investigation(title="Triage Case")
 

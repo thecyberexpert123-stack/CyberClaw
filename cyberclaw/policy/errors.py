@@ -53,6 +53,14 @@ class SupervisionRequiredError(PolicyValidationError):
         super().__init__(message, policy_id=policy_id)
 
 
+class AuthorizationDeferredError(PolicyValidationError):
+    """Raised when policy defers execution. DEFER is not DENY and not ALLOW."""
+
+    def __init__(self, message: str, decision_id: Optional[str] = None, policy_id: Optional[str] = None) -> None:
+        self.decision_id = decision_id
+        super().__init__(message, policy_id=policy_id)
+
+
 class PolicyConflictError(PolicyError):
     """Raised when irreconcilable or illegal policy rule conflicts are encountered."""
     pass

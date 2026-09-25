@@ -204,6 +204,7 @@ class PolicyEngine:
                 "action_scope": ctx.get("action_scope"),
                 "case_stage": ctx.get("case_stage"),
                 "policy_id": decision.policy_id,
+                "policy_version": decision.policy_version,
             },
         )
 
@@ -241,6 +242,7 @@ class PolicyEngine:
             details={
                 "decision": decision.decision.value,
                 "policy_id": decision.policy_id,
+                "policy_version": decision.policy_version,
                 "matched_rules": decision.matched_rules,
                 "reasons": decision.reasons,
                 "obligations": decision.obligations,

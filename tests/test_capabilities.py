@@ -74,6 +74,8 @@ def test_provider_registration_and_execution():
 
 def test_provider_readiness_failure():
     registry = CapabilityRegistry()
+    # A provider must not create the capability it claims to back.
+    registry.register_capability(Capability(id="test.unready", name="Unready"))
     provider = MockUnreadyProvider(id="p_unready", name="Unready Provider", capability_id="test.unready")
     registry.register_provider(provider)
 
@@ -87,6 +89,7 @@ def test_provider_readiness_failure():
 
 def test_provider_priority_fallback():
     registry = CapabilityRegistry()
+    registry.register_capability(Capability(id="test.fallback", name="Fallback"))
     # High priority provider is unready
     unready_p = MockUnreadyProvider(id="p_high", name="High Unready", capability_id="test.fallback", priority=200)
     # Lower priority provider is ready

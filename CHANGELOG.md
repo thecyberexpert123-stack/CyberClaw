@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Authority Boundary Hardening & Contract Unification v0.1
+- **`cyberclaw/authority/`**: Explicit contract for resolution, provider outcomes, recovery disposition, lease ownership, semantic versions, and persistence document classes. It does not authorize, execute, persist, or replay.
+- **No silent inheritance**: specialist advertisement, provider registration, and queued capability ids no longer create capability authority. Core execution and requirement fulfillment use the registered capability, then lifecycle, trust, permission, and policy, before dispatch.
+- **Execution records**: authoritative executions retain capability id and version, provider, lifecycle, trust, permission scope, policy id and version, decision, actor, case, and task. Replay reads the recorded policy reference and does not call the current policy engine.
+- **Recovery and leases**: unstarted claims may be requeued; an execution record reconciles completion or preserves unknown; reversible in-progress crashes keep the existing governed retry; consequential and destructive unknown states are not replayed. Lease expiry is not permission to execute again.
+- **Provider outcomes**: classification uses the execution boundary and explicit error codes. Exception text such as "timeout" is not a retry oracle. `DEFER` remains distinct from `DENY`.
+- **Persistence**: missing, empty-valid, populated, partial, and corrupt documents stay distinct for runtime and collaboration history.
+- **Tests**: 52 new contract and regression tests. Full suite is 499 passed. Tests that treated advertisement as registration now register the capability explicitly.
+
 ### Added - Adversarial Invariant & Chaos Validation v0.1
 - **`cyberclaw/chaos/`**: Deterministic, domain-neutral fault injection, invariant registry, interleaving harness, corruption classifier, and diagnosable scenario reports. The framework does not execute shells, open networks, approve strategies, or replace replay, policy, or persistence.
 - **Cross-subsystem scenarios**: runtime crash → recovery → replay → knowledge reconstruction → learning reconstruction; policy-version time travel; branch → learning isolation; collaboration, idempotency, and temporal knowledge attacks.

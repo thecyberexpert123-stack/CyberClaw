@@ -6,6 +6,8 @@ from datetime import timedelta
 import threading
 from typing import Any, Dict, List, Optional
 from cyberclaw.runtime.errors import ConcurrencyConflictError, QueueError
+from cyberclaw.authority.models import WorkerOwnership
+from cyberclaw.authority.recovery import classify_worker_ownership
 from cyberclaw.runtime.models import (
     ExecutionState,
     RuntimeTask,
@@ -204,18 +206,15 @@ class DurableTaskQueue:
         """Reset claims on workers that timed out before progressing or completing."""
         now = utc_now()
         for task in self._tasks.values():
-            if (
-                task.status in (TaskStatus.VALIDATING, TaskStatus.AUTHORIZED, TaskStatus.DISPATCHED)
-                and task.claim_expires_at
-                and task.claim_expires_at < now
-            ):
-                # A lease expiry is not authority to replay work that may already
-                # have reached a provider. Leave non-unstarted tasks for recovery.
-                if task.execution_state != ExecutionState.UNSTARTED:
-                    continue
-                task.claimed_by_worker = None
-                task.claim_expires_at = None
-                task.status = TaskStatus.QUEUED
+            if not task.claim_expires_at or task.claim_expires_at >= now:
+                continue
+            # Lease expiry is not permission to execute again. Only a claim that
+            # never started may return to the queue.
+            if classify_worker_ownership(task) != WorkerOwnership.CLAIMED:
+                continue
+            task.claimed_by_worker = None
+            task.claim_expires_at = None
+            task.status = TaskStatus.QUEUED
 
     def export_state(self) -> List[Dict[str, Any]]:
         """Export serialized tasks for atomic persistence."""

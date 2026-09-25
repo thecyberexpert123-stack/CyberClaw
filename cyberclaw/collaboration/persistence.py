@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List
+from cyberclaw.authority.models import PersistenceDocumentState
 from cyberclaw.collaboration.coordinator import CollaborationCoordinator
 from cyberclaw.collaboration.errors import CollaborationPersistenceError
 from cyberclaw.collaboration.models import (
@@ -85,9 +86,10 @@ class CollaborationPersistenceManager:
         conf_file = collab_dir / "conflicts.json"
         digest_file = collab_dir / "digest.json"
 
-        if not req_file.exists():
+        present = [path.exists() for path in (req_file, conf_file, digest_file)]
+        if not any(present):
             return False
-        if not conf_file.exists() or not digest_file.exists():
+        if not all(present):
             raise CollaborationPersistenceError(
                 "Collaboration history is incomplete. Refusing to load a partial record.",
                 corruption_class="MISSING_RECORD",
@@ -146,3 +148,33 @@ class CollaborationPersistenceManager:
         for conflict in parsed_conflicts:
             coordinator.conflict_manager.register_conflict(conflict)
         return True
+
+    @classmethod
+    def classify_directory(cls, base_dir: Path) -> tuple[str, str]:
+        """Classify collaboration files without importing them."""
+        collab_dir = base_dir / "collaboration"
+        req_file = collab_dir / "requests.json"
+        conf_file = collab_dir / "conflicts.json"
+        digest_file = collab_dir / "digest.json"
+        present = [path for path in (req_file, conf_file, digest_file) if path.exists()]
+        if not present:
+            return PersistenceDocumentState.MISSING.value, "no collaboration persistence files"
+        if len(present) != 3:
+            return PersistenceDocumentState.PARTIAL.value, "companion collaboration record is missing"
+        try:
+            requests_text = req_file.read_text(encoding="utf-8")
+            conflicts_text = conf_file.read_text(encoding="utf-8")
+            requests_data = _read_json(req_file)
+            conflicts_data = _read_json(conf_file)
+            digest_data = _read_json(digest_file)
+        except CollaborationPersistenceError as exc:
+            return PersistenceDocumentState.CORRUPT.value, exc.corruption_class
+        if not isinstance(requests_data, list) or not isinstance(conflicts_data, list):
+            return PersistenceDocumentState.CORRUPT.value, "INVALID_SCHEMA"
+        if not isinstance(digest_data, dict) or "digest" not in digest_data:
+            return PersistenceDocumentState.CORRUPT.value, "INVALID_SCHEMA"
+        if _digest_texts(requests_text, conflicts_text) != digest_data["digest"]:
+            return PersistenceDocumentState.CORRUPT.value, "DIGEST_MISMATCH"
+        if requests_data or conflicts_data:
+            return PersistenceDocumentState.POPULATED_VALID.value, "digest matches populated collaboration state"
+        return PersistenceDocumentState.EMPTY_VALID.value, "digest matches an empty collaboration document"

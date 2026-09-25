@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from cyberclaw.authority.outcomes import classify_provider_result
+from cyberclaw.authority.resolution import execution_boundary, require_registered_capability
 from cyberclaw.capabilities.capability import Capability
+from cyberclaw.capabilities.errors import CapabilityTrustError, CapabilityUnavailableError
 from cyberclaw.capabilities.provider import CapabilityProvider, ExecutionContext
 from cyberclaw.capabilities.registry import CapabilityRegistry
 from cyberclaw.dfa.machine import CoreDFA, InvalidTransitionError
@@ -51,6 +54,7 @@ from cyberclaw.policy.models import (
 )
 from cyberclaw.policy.errors import (
     ApprovalRequiredError,
+    AuthorizationDeferredError,
     AuthorizationDeniedError,
     PolicyValidationError,
     SupervisionRequiredError,
@@ -88,6 +92,8 @@ class CyberClawCore:
             event_bus=self.event_bus,
             correlation_engine=self.correlation,
         )
+        # Coordination routes. It does not invoke specialists by itself.
+        self.coordinator.governed_executor = self.execute_action
 
         # Initialize Adaptive Planning Engine
         from cyberclaw.planning.engine import AdaptivePlanningEngine
@@ -461,6 +467,7 @@ class CyberClawCore:
         policy_id: Optional[str] = None,
         supervision_acknowledged: bool = False,
         approval_token: Optional[str] = None,
+        requirement_id: Optional[str] = None,
     ) -> ExecutionResult:
         """Orchestrate the full end-to-end execution lifecycle:
         1. Validate current DFA state, parameters schema, and permissions.
@@ -477,15 +484,21 @@ class CyberClawCore:
         if not inv:
             raise KeyError(f"Investigation '{investigation_id}' not found.")
 
-        capability = self.capabilities.get_capability(capability_id)
-        if not capability:
-            # Fallback check: maybe specialist advertises it
-            capability = Capability(
-                id=capability_id,
-                name=capability_id,
-                description="Dynamically resolved capability",
+        # Advertisement, a queued id, and a provider object are not registration.
+        capability = require_registered_capability(self.capabilities, capability_id)
+        boundary = execution_boundary(capability)
+        if boundary == "NOT_TRUSTED":
+            raise CapabilityTrustError(
+                f"Capability '{capability.versioned_id}' has trust state "
+                f"'{capability.trust_state.value}' and cannot be executed.",
+                capability_id=capability.id,
             )
-            self.capabilities.register_capability(capability)
+        if boundary == "NOT_EXECUTABLE":
+            raise CapabilityUnavailableError(
+                f"Capability '{capability.versioned_id}' is in lifecycle state "
+                f"'{capability.lifecycle_state.value}' and cannot be executed.",
+                capability_id=capability.id,
+            )
 
         # 1. Multi-phase pre-execution validation
         allowed_dfa_states = [CoreState.READY, CoreState.CLASSIFY, CoreState.INVESTIGATE, CoreState.VERIFY]
@@ -533,6 +546,12 @@ class CyberClawCore:
             elif auth_decision.decision == AuthorizationDecisionType.REQUIRE_SUPERVISION:
                 raise SupervisionRequiredError(
                     f"Execution requires operational supervision: {'; '.join(auth_decision.reasons)}",
+                    decision_id=auth_decision.decision_id,
+                    policy_id=auth_decision.policy_id,
+                )
+            elif auth_decision.decision == AuthorizationDecisionType.DEFER:
+                raise AuthorizationDeferredError(
+                    f"Execution deferred by policy: {'; '.join(auth_decision.reasons)}",
                     decision_id=auth_decision.decision_id,
                     policy_id=auth_decision.policy_id,
                 )
@@ -611,8 +630,9 @@ class CyberClawCore:
             )
 
         # Record execution in case history
+        provider_outcome = classify_provider_result(result)
         inv.case_manager.record_execution(
-            requirement_id=str(uuid4()),
+            requirement_id=requirement_id or str(uuid4()),
             specialist_id=resolved_specialist_id or "core.registry",
             capability_id=capability_id,
             capability_version=capability.version,
@@ -623,10 +643,17 @@ class CyberClawCore:
             error=result.error,
             lifecycle_state=capability.lifecycle_state.value,
             trust_state=capability.trust_state.value,
+            permission_scope=scope.value,
             action_scope=scope.value,
             authorization_decision_id=auth_decision.decision_id,
             risk_level=auth_decision.risk_assessment.overall_risk.value,
             policy_id=auth_decision.policy_id,
+            policy_version=auth_decision.policy_version,
+            decision=auth_decision.decision.value,
+            actor=actor,
+            provider_id=resolved_specialist_id,
+            provider_outcome=provider_outcome.value,
+            investigation_id=investigation_id,
         )
 
         # Observability for execution
@@ -730,17 +757,32 @@ class CyberClawCore:
             investigation=inv,
             requirement_id=requirement_id,
             parameters=parameters,
+            actor=actor,
         )
 
-        # Record execution history and resolution decision
+        # The governed executor already authorized and recorded the capability
+        # execution. This entry records the requirement outcome for replay.
+        # It copies the recorded policy reference and does not authorize again.
+        latest = inv.case_manager.execution_history[-1] if inv.case_manager.execution_history else None
         inv.case_manager.record_execution(
             requirement_id=req.id,
             specialist_id=req.assigned_specialist_id or "unassigned",
             capability_id=req.assigned_capability_id or "unassigned",
             status=req.status.value,
-            duration_ms=None,
             evidence_count=len(req.resulting_evidence_ids),
             evidence_ids=list(req.resulting_evidence_ids),
+            policy_id=getattr(latest, "policy_id", None),
+            policy_version=getattr(latest, "policy_version", None),
+            decision=getattr(latest, "decision", None),
+            actor=actor,
+            investigation_id=investigation_id,
+            capability_version=getattr(latest, "capability_version", "1.0.0"),
+            lifecycle_state=getattr(latest, "lifecycle_state", "AVAILABLE"),
+            trust_state=getattr(latest, "trust_state", "TRUSTED_WITH_SCOPE"),
+            permission_scope=getattr(latest, "permission_scope", "consequential"),
+            action_scope=getattr(latest, "action_scope", "consequential"),
+            authorization_decision_id=getattr(latest, "authorization_decision_id", None),
+            provider_outcome=getattr(latest, "provider_outcome", None),
         )
         if req.resulting_evidence_ids:
             inv.record_journal_entry(

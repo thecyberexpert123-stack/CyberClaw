@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Authority Boundary Hardening & Contract Unification v0.1
+
+### Lesson 30: An Advertisement Is Not a Registry
+- **Observation**: `CyberClawCore.execute_action` constructed and registered a capability when a specialist advertised an unknown id. `CapabilityRegistry.register_provider` did the same for a provider. Requirement fulfillment then called the specialist endpoint directly, skipping lifecycle, trust, permission, and policy.
+- **Consequence**: A subsystem could gain execution authority by naming an id. The durable runtime had already rejected that pattern. The synchronous paths had not.
+- **Resolution**: Registration is an explicit governance act. Advertisement still routes a request after the capability is registered and executable. Fulfillment calls the existing governed executor. Tests that encoded the old shortcut now register the capability and say why.
+
+### Lesson 31: Exception Text Is Not an Execution State
+- **Observation**: Dispatch treated "timeout" in an exception message as retryable. The executor also treated "timeout", "temporary", and "503" in a returned error string as a known temporary failure.
+- **Consequence**: A message could authorize a second execution after the provider might already have run.
+- **Resolution**: Ambiguous invocation is `UNKNOWN_EXECUTION_STATE`. A known temporary failure requires the explicit code `PROVIDER_TEMPORARY_FAILURE`. A timeout observed before invocation can still be retried because the provider was not entered. A timeout observed after dispatch cannot.
+
+### Lesson 32: Recovery Does Not Read the Clock
+- **Observation**: The safe recovery decision was already present in scope, execution progress, and the idempotency record. It was not derived from how long the worker had been gone.
+- **Consequence**: Formalizing a second policy would have drifted from the runtime that chaos already validated.
+- **Resolution**: `recovery_disposition` is the existing matrix: requeue unstarted work, reconcile a recorded completion, retry only a reversible crash with no execution record, and preserve every other unknown. Lease reclaim uses the same ownership classes.
+
 ## Milestone: Adversarial Invariant & Chaos Validation v0.1
 
 ### Lesson 27: A Swallowed Load Error Is a Silent Rewrite

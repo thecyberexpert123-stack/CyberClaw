@@ -59,10 +59,12 @@ class SpecialistDispatcher:
             return result, resolved_id
 
         except Exception as e:
-            is_transient = "timeout" in str(e).lower() or "connection" in str(e).lower() or "transient" in str(e).lower()
+            # Exception text is not an execution-state oracle. A message that
+            # contains "timeout" does not mean the provider did not run, and it
+            # does not authorize a retry.
             raise ProviderExecutionError(
                 f"Execution failed on capability '{capability_id}': {e}",
                 task_id=task.task_id,
                 investigation_id=task.investigation_id,
-                is_retryable=is_transient,
+                is_retryable=False,
             ) from e
