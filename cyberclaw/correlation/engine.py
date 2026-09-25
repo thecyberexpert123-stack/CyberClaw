@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from cyberclaw.correlation.models import ContradictionRecord
 from cyberclaw.correlation.rules import (
     CertificateIdentityCorrelationRule,
+    WhoisRegistrationCorrelationRule,
     CorrelationRule,
     DnsResolutionCorrelationRule,
     NetworkServiceCorrelationRule,
@@ -42,6 +43,7 @@ class CorrelationEngine:
             self.rules = [
                 DnsResolutionCorrelationRule(),
                 CertificateIdentityCorrelationRule(),
+                WhoisRegistrationCorrelationRule(),
                 NetworkServiceCorrelationRule(),
                 SharedInfrastructureCorrelationRule(),
             ]

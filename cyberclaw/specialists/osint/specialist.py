@@ -63,13 +63,15 @@ class OSINTSpecialist(SpecialistEndpoint):
 
     SPECIALIST_ID = "osint_specialist"
     SPECIALIST_NAME = "CyberClaw OSINT Specialist"
-    VERSION = "0.1.0"
+    VERSION = "1.0.0"
 
     def __init__(
         self,
         workspace_base: Optional[Path] = None,
         use_default_mock_providers: bool = True,
+        require_governed_dispatch: bool = False,
     ) -> None:
+        self.require_governed_dispatch = require_governed_dispatch
         self.workspace = OSINTWorkspaceManager(workspace_base)
         self.memory = OSINTLocalMemory()
         self.experiences = OSINTExperienceStore()
@@ -117,6 +119,24 @@ class OSINTSpecialist(SpecialistEndpoint):
 
     def invoke(self, request: SpecialistRequest) -> SpecialistResponse:
         """Execute a requested action or capability behind the contract boundary."""
+        if self.require_governed_dispatch:
+            from cyberclaw.authority.dispatch import governed_dispatch
+
+            if governed_dispatch(request.context) is None:
+                refused = ExecutionResult.failure(
+                    error=(
+                        "OSINT specialist refused an ungoverned invocation. "
+                        "Use the governed executor after lifecycle, trust, permission, and policy checks."
+                    ),
+                    error_code="UNGOVERNED_PROVIDER_INVOCATION",
+                    execution_id=request.context.execution_id,
+                )
+                return SpecialistResponse.from_result(
+                    self.SPECIALIST_ID,
+                    request.request_id,
+                    refused,
+                )
+
         # 1. Obtain or initialize local investigation context
         local_inv = self._get_or_create_local_investigation(
             investigation_id=request.investigation_id,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
+from cyberclaw.authority.dispatch import stamp_governed_dispatch
 from cyberclaw.authority.models import ProviderOutcome
 from cyberclaw.authority.outcomes import classify_provider_result, explicit_temporary_failure
 from cyberclaw.authority.resolution import execution_boundary
@@ -235,13 +236,23 @@ class RuntimeExecutor:
         TaskLifecycleDFA.transition(task, TaskStatus.RUNNING)
         task.execution_state = ExecutionState.IN_PROGRESS
 
-        exec_ctx = ExecutionContext(
-            execution_id=str(uuid4()),
-            investigation_id=task.investigation_id,
-            correlation_id=task.correlation_id or task.investigation_id,
+        exec_ctx = stamp_governed_dispatch(
+            ExecutionContext(
+                execution_id=str(uuid4()),
+                investigation_id=task.investigation_id,
+                correlation_id=task.correlation_id or task.investigation_id,
+                actor=task.actor,
+                granted_permissions=list(permission_manager.get_effective_permissions(task.actor)),
+                environment={"state": investigation.current_state.value, "runtime": True},
+            ),
+            authorization_decision_id=auth_decision.decision_id,
+            policy_id=auth_decision.policy_id,
+            policy_version=auth_decision.policy_version,
+            capability_id=capability.id,
+            capability_version=capability.version,
             actor=task.actor,
-            granted_permissions=list(permission_manager.get_effective_permissions(task.actor)),
-            environment={"state": investigation.current_state.value, "runtime": True},
+            requirement_id=task.requirement_id,
+            task_id=task.task_id,
         )
 
         try:

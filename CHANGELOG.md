@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - OSINT Investigation Vertical v1.0
+- **Governed collection**: the investigation specialist refuses an unstamped invocation. Fixture and live providers do the same. Core and the durable runtime copy an authorization they have already issued onto the execution context. That marker is not a second policy engine. v0.1 mock providers remain for local unit tests.
+- **Offline fixture catalog**: DNS, certificate, WHOIS, and domain metadata for `apex.example`, plus empty, known-failure, and malformed targets. A missing fixture is not an empty observation. The optional live provider stays disabled unless `enabled=True`.
+- **Evidence contract**: observations keep provider version, source reference, collection time, authorization, and an integrity digest when those facts were supplied. Missing facts are marked missing. WHOIS normalization no longer invents `REDACTED` or `Unknown`.
+- **Existing control plane**: follow-up certificate requirements come from the entity-enrichment planner. Registration correlation adds an observed `registered_by` relationship only when `registrant_org` is present. Knowledge materialization projects case relationships with their epistemic status and evidence references. Replay prefers the ingestion seal when the live evidence object has changed.
+- **Tests**: 10 new deterministic tests. Full suite is 517 passed. No live domain is required.
+
 ### Added - Adversarial Authority Probe & Security Contract Hardening v0.2
 - **Approval records**: `approval_granted=True` and an arbitrary `approval_token` are not authorization. `PolicyEngine.request_approval` issues a record bound to the case, capability, version, scope, and requester. Expired, mismatched, self-approved, and unknown tokens do not execute. A lead who is not the proposer still can.
 - **Entity identity**: an entity is `(type, name)`. Same type and name updates one record. A different type with the same name coexists across the case, replay, branch, correlation, snapshot, and knowledge graph. Name-only historical indexes are migrated explicitly and are not treated as if the missing type had been stored.

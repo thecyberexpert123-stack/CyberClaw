@@ -61,7 +61,7 @@ CyberClaw/
 │   │   │   ├── evaluation.py   # SkillEvaluator & SkillEvaluation
 │   │   │   ├── promotion.py    # PromotionManager, PromotionProposal, ApprovalDecision
 │   │   │   └── engine.py       # SpecialistSelfDevelopmentEngine
-│   │   └── osint/              # OSINT Specialist v0.1 (autonomous passive intelligence)
+│   │   └── osint/              # OSINT Specialist v1.0 (governed passive investigation)
 │   │       ├── specialist.py   # OSINTSpecialist implementing SpecialistEndpoint & self-development
 │   │       ├── investigation.py# OSINTInvestigation & target classification
 │   │       ├── dfa/            # Local OSINT DFA (READY -> TARGET_RECEIVED -> CLASSIFY -> PLAN -> COLLECT -> CORRELATE -> VERIFY -> COMPLETE)
@@ -224,6 +224,17 @@ The OSINT Specialist is the first semi-autonomous specialist operating behind th
   * Prioritized provider resolution with readiness evaluation (`is_ready`) and automatic operational fallback.
   * Strict distinction between `SUCCESS`, `SUCCESS_EMPTY`, and `FAILURE`.
 * **Zero Core Pollution**: Core contains zero OSINT-specific imports or conditionals, validated by multi-specialist coexistence tests with Network Specialist.
+
+### Governed investigation path (v1.0)
+
+The v0.1 mock providers remain available for local specialist unit tests. The investigation path does not use them.
+
+* **Fixture provider**: deterministic catalog keyed by capability and target. A missing fixture is a provider failure, not an empty observation. Tests do not use a live domain.
+* **Live provider**: optional, disabled unless constructed with `enabled=True`. A network error is a provider failure. The default suite does not enable it.
+* **Dispatch marker**: after the existing policy authorization succeeds, Core and the durable runtime copy that decision onto the execution context. The OSINT investigation specialist and fixture/live providers refuse collection without it. The marker does not authorize anything.
+* **Evidence**: provider output is an observation. Missing registrant fields, source references, and collection times stay missing. The normalizer does not fill them with placeholders.
+* **Follow-up**: the existing entity-enrichment planner proposes certificate lookup when a domain has no certificate evidence. Core has no OSINT branch for that decision.
+* **Not a claim of production OSINT**: accuracy is limited to the fixture catalog and the tests that exercise it.
 
 ---
 

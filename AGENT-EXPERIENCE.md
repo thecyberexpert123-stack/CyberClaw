@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: OSINT Investigation Vertical v1.0
+
+### Lesson 36: An Invocation Is Not a Governed Execution
+- **Observation**: `OSINTSpecialist.invoke()` executed a mock provider with an ordinary `ExecutionContext`. Core authorized before `route_request`, but the request carried no marker of that decision. A fixture provider called directly would have collected if the only control had been "please use Core."
+- **Consequence**: The specialist package could produce observations that had never passed lifecycle, trust, permission, or policy.
+- **Resolution**: The investigation specialist and the fixture/live providers refuse collection unless the executor has copied an already-issued authorization onto the context. Mock providers stay available for the existing local unit tests. The marker does not call the policy engine.
+
+### Lesson 37: The Live Evidence Object Is Not the Historical Record
+- **Observation**: Replay resolved evidence ids against the current store. After a governed DNS observation was ingested, changing `values[0]` from `203.0.113.10` to `198.51.100.50` made a second replay return the mutated address. The journal had stored the id, not the payload.
+- **Consequence**: A later in-memory edit could rewrite what the investigation had observed.
+- **Resolution**: Ingestion and snapshot capture seal the payload. Replay keeps the earliest seal and uses it when the live digest differs. History that was never sealed still falls back to the live object. The snapshot digest inputs were not changed.
+
+### Lesson 38: A Placeholder Is a Fabricated Observation
+- **Observation**: WHOIS normalization substituted `REDACTED` and `Unknown` for absent registrant fields. A successful fixture with no source reference would have needed the same treatment if the normalizer invented a URI. The knowledge graph also had the case relationship `resolves_to` and did not project it, so the investigation graph and the knowledge graph disagreed.
+- **Consequence**: Missing data looked like collected data, and an observed relationship was invisible to knowledge queries.
+- **Resolution**: Missing fields, source references, and collection times are marked missing. Registration correlation creates `registered_by` only when `registrant_org` is present. Knowledge materialization copies the case relation, its observed-or-inferred status, and its evidence ids, and skips an ambiguous entity name instead of choosing one.
+
 ## Milestone: Adversarial Authority Probe & Security Contract Hardening v0.2
 
 ### Lesson 33: A Boolean Is Not an Approval Record

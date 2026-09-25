@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from cyberclaw.authority.dispatch import stamp_governed_dispatch
 from cyberclaw.authority.outcomes import classify_provider_result
 from cyberclaw.authority.resolution import execution_boundary, require_registered_capability
 from cyberclaw.capabilities.capability import Capability
@@ -579,14 +580,24 @@ class CyberClawCore:
                 actor=actor,
             )
 
-        # Prepare execution context
-        exec_ctx = ExecutionContext(
-            execution_id=str(uuid4()),
-            investigation_id=investigation_id,
-            correlation_id=investigation_id,
+        # Prepare execution context. The stamp records the authorization that
+        # already succeeded. It is not a second policy decision.
+        exec_ctx = stamp_governed_dispatch(
+            ExecutionContext(
+                execution_id=str(uuid4()),
+                investigation_id=investigation_id,
+                correlation_id=investigation_id,
+                actor=actor,
+                granted_permissions=list(self.permissions.get_effective_permissions(actor)),
+                environment={"state": inv.current_state.value},
+            ),
+            authorization_decision_id=auth_decision.decision_id,
+            policy_id=auth_decision.policy_id,
+            policy_version=auth_decision.policy_version,
+            capability_id=capability.id,
+            capability_version=capability.version,
             actor=actor,
-            granted_permissions=list(self.permissions.get_effective_permissions(actor)),
-            environment={"state": inv.current_state.value},
+            requirement_id=requirement_id,
         )
 
         # 2. Invoke Specialist or direct Provider

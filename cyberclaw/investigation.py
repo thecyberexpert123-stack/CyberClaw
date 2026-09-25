@@ -14,6 +14,7 @@ from cyberclaw.memory.memory import MemoryStore
 from cyberclaw.types import Entity, Hypothesis, Relationship, entity_storage_key, remember_entity
 from cyberclaw.coordination.requirements import InformationRequirement
 from cyberclaw.correlation.models import ContradictionRecord
+from cyberclaw.evidence.seals import seal_evidence
 
 
 def utc_now() -> datetime:
@@ -154,7 +155,10 @@ class Investigation(BaseModel):
             entry_type="EVIDENCE_INGESTED",
             summary=f"Ingested evidence: {evidence.subject} ({evidence.type})",
             reference_id=evidence.id,
-            details={"evidence_ids": [evidence.id]},
+            details={
+                "evidence_ids": [evidence.id],
+                "evidence_records": [seal_evidence(evidence)],
+            },
         )
 
     # --------------------------------------------------------------------------

@@ -17,6 +17,7 @@ from cyberclaw.coordination.requirements import InformationRequirement, Requirem
 from cyberclaw.correlation.models import ContradictionRecord
 from cyberclaw.dfa.states import CoreState
 from cyberclaw.evidence.models import Evidence
+from cyberclaw.evidence.seals import select_historical_evidence
 from cyberclaw.investigation import Investigation
 from cyberclaw.planning.models import InvestigationPlan, StoppingCondition
 from cyberclaw.replay.errors import (
@@ -28,6 +29,24 @@ from cyberclaw.replay.errors import (
 from cyberclaw.replay.models import ReconstructedState, ReplayReport
 from cyberclaw.replay.validator import HistoryValidator
 from cyberclaw.types import Entity, Hypothesis, Relationship, normalize_entity_index, remember_entity
+
+
+def _evidence_seals(journal: List[Any], snapshots: List[Any]) -> Dict[str, Dict[str, Any]]:
+    """Earliest ingestion seal wins. Later live mutation must not replace it."""
+    seals: Dict[str, Dict[str, Any]] = {}
+    for entry in journal:
+        details = getattr(entry, "details", None) or {}
+        for seal in details.get("evidence_records") or []:
+            evidence_id = seal.get("id") if isinstance(seal, dict) else None
+            if evidence_id and evidence_id not in seals:
+                seals[evidence_id] = seal
+    for snapshot in snapshots:
+        metadata = getattr(snapshot, "metadata", None) or {}
+        for seal in metadata.get("evidence_records") or []:
+            evidence_id = seal.get("id") if isinstance(seal, dict) else None
+            if evidence_id and evidence_id not in seals:
+                seals[evidence_id] = seal
+    return seals
 
 
 class ReplayEngine:
@@ -63,6 +82,7 @@ class ReplayEngine:
         investigation_id = cs.investigation_id
         journal = sorted(cs.journal, key=lambda e: e.sequence)
         snapshots = sorted(cs.snapshots, key=lambda s: s.sequence)
+        evidence_seals = _evidence_seals(journal, snapshots)
         decisions = sorted(cs.decision_history, key=lambda d: d.sequence)
         all_plans = list(cs.planning_history)
         all_requirements = list(cs.requirements.values())
@@ -130,11 +150,11 @@ class ReplayEngine:
 
             # Seed state directly from validated checkpoint
             dfa_state = snap_match.dfa_state
-            evidence = [
-                e.model_copy(deep=True)
-                for e in all_evidence
-                if e.id in snap_match.evidence_ids
-            ]
+            evidence = []
+            for evidence_id in snap_match.evidence_ids:
+                historical = select_historical_evidence(evidence_id, all_evidence, evidence_seals)
+                if historical is not None:
+                    evidence.append(historical)
             entities = normalize_entity_index(
                 {k: v.model_copy(deep=True) for k, v in snap_match.entities.items()}
             )
@@ -190,9 +210,11 @@ class ReplayEngine:
                 if entry.reference_id and entry.reference_id not in eids:
                     eids.append(entry.reference_id)
                 for eid in eids:
-                    match_ev = next((e for e in all_evidence if e.id == eid), None)
-                    if match_ev and not any(e.id == eid for e in evidence):
-                        evidence.append(match_ev.model_copy(deep=True))
+                    if any(e.id == eid for e in evidence):
+                        continue
+                    historical = select_historical_evidence(eid, all_evidence, evidence_seals)
+                    if historical is not None:
+                        evidence.append(historical)
 
             elif etype == JournalEntryType.REQUIREMENT_CREATED:
                 rid = entry.reference_id
@@ -212,9 +234,11 @@ class ReplayEngine:
                         pass
                 # Add resulting evidence if present
                 for eid in entry.details.get("evidence_ids", []):
-                    match_ev = next((e for e in all_evidence if e.id == eid), None)
-                    if match_ev and not any(e.id == eid for e in evidence):
-                        evidence.append(match_ev.model_copy(deep=True))
+                    if any(e.id == eid for e in evidence):
+                        continue
+                    historical = select_historical_evidence(eid, all_evidence, evidence_seals)
+                    if historical is not None:
+                        evidence.append(historical)
 
             elif etype == JournalEntryType.HYPOTHESIS_EVALUATED:
                 hid = entry.reference_id or entry.details.get("hypothesis_id")

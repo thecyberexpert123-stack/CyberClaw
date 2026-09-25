@@ -23,7 +23,10 @@ from cyberclaw.specialists.osint.memory.store import (
     OSINTLocalMemory,
 )
 from cyberclaw.specialists.osint.normalizers.normalizer import OSINTNormalizer
+from cyberclaw.specialists.osint.governance import configure_governed_osint
 from cyberclaw.specialists.osint.providers.base import OSINTProvider
+from cyberclaw.specialists.osint.providers.fixtures import FixtureOSINTProvider
+from cyberclaw.specialists.osint.providers.live import LiveOSINTProvider
 from cyberclaw.specialists.osint.providers.mock_providers import (
     MockCertMetadataProvider,
     MockDnsLookupProvider,
@@ -50,7 +53,10 @@ __all__ = [
     "CAPABILITY_CERT_METADATA",
     "CAPABILITY_WHOIS_LOOKUP",
     "get_osint_capabilities",
+    "configure_governed_osint",
     "OSINTProvider",
+    "FixtureOSINTProvider",
+    "LiveOSINTProvider",
     "MockDomainMetadataProvider",
     "MockDnsLookupProvider",
     "MockCertMetadataProvider",

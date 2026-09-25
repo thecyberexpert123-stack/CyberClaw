@@ -185,6 +185,57 @@ class CertificateIdentityCorrelationRule(CorrelationRule):
         return new_entities, new_relationships, []
 
 
+class WhoisRegistrationCorrelationRule(CorrelationRule):
+    """Correlates registration evidence into an organization and an observed registration link.
+
+    A missing registrant organization produces nothing. It is not inferred.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="whois_registration_correlation",
+            description="Extracts organization entities and observed registered_by links from registration evidence.",
+        )
+
+    def evaluate(
+        self,
+        evidence_list: List[Evidence],
+        existing_entities: Dict[str, Entity],
+        investigation_id: str,
+    ) -> Tuple[List[Entity], List[Relationship], List[ContradictionRecord]]:
+        new_entities: List[Entity] = []
+        new_relationships: List[Relationship] = []
+        registration_evidence = [item for item in evidence_list if "whois" in item.type.lower()]
+
+        for evidence in registration_evidence:
+            value = evidence.value if isinstance(evidence.value, dict) else {}
+            organization = value.get("registrant_org")
+            if not organization:
+                continue
+            if _entity_absent(existing_entities, new_entities, organization, "organization"):
+                new_entities.append(
+                    Entity(type="organization", name=organization, attributes={"source": "registration_evidence"})
+                )
+            provenance = CorrelationProvenance(
+                rule_name=self.name,
+                specialists_involved=[evidence.provenance.specialist_id] if evidence.provenance.specialist_id else [],
+                capabilities_involved=[evidence.provenance.capability_id] if evidence.provenance.capability_id else [],
+                investigation_id=investigation_id,
+            )
+            new_relationships.append(
+                Relationship(
+                    source_id=evidence.subject,
+                    target_id=organization,
+                    relation_type="registered_by",
+                    is_inferred=False,
+                    supporting_evidence_ids=[evidence.id],
+                    confidence=evidence.confidence,
+                    metadata={"provenance": provenance.model_dump()},
+                )
+            )
+        return new_entities, new_relationships, []
+
+
 class NetworkServiceCorrelationRule(CorrelationRule):
     """Correlates network scanning evidence into Service/Port entities and exposes_service links."""
 

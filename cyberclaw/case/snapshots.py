@@ -8,6 +8,7 @@ from cyberclaw.case.models import (
     SnapshotDelta,
     utc_now,
 )
+from cyberclaw.evidence.seals import seal_evidence
 from cyberclaw.investigation import Investigation
 
 
@@ -40,7 +41,10 @@ class SnapshotManager:
         hypotheses_copy = {k: v.model_copy(deep=True) for k, v in investigation.hypotheses.items()}
         reqs_copy = {k: v.model_copy(deep=True) for k, v in investigation.information_requirements.items()}
         contradictions_copy = [c.model_copy(deep=True) for c in investigation.contradictions]
-        evidence_ids = [e.id for e in investigation.evidence_store.list_all()]
+        evidence_items = investigation.evidence_store.list_all()
+        evidence_ids = [e.id for e in evidence_items]
+        snapshot_metadata = dict(metadata or {})
+        snapshot_metadata["evidence_records"] = [seal_evidence(item) for item in evidence_items]
 
         snapshot = InvestigationSnapshot(
             investigation_id=investigation.id,
@@ -56,7 +60,7 @@ class SnapshotManager:
             contradictions=contradictions_copy,
             active_plan_id=active_plan_id,
             stopping_condition=stopping_condition,
-            metadata=metadata or {},
+            metadata=snapshot_metadata,
         )
 
         snapshot.seal()

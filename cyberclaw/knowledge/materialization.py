@@ -18,6 +18,75 @@ from cyberclaw.knowledge.provenance import KnowledgeProvenanceRecord
 from cyberclaw.types import entity_storage_key
 
 
+def _node_for_relationship_ref(graph: TemporalKnowledgeGraph, investigation: Any, ref: str) -> Optional[str]:
+    """Resolve a case relationship endpoint without guessing among colliding names."""
+    matches = []
+    for entity in getattr(investigation, "entities", {}).values():
+        if entity.id == ref or entity.name == ref:
+            node_id = f"entity:{entity_storage_key(entity.type, entity.name)}"
+            if graph.get_node(node_id):
+                matches.append(node_id)
+    unique = list(dict.fromkeys(matches))
+    if len(unique) == 1:
+        return unique[0]
+    if len(unique) > 1:
+        return None
+    subject_id = f"entity-{ref.strip().lower()}"
+    if graph.get_node(subject_id):
+        return subject_id
+    return None
+
+
+def _materialize_case_relationships(graph: TemporalKnowledgeGraph, investigation: Any) -> None:
+    """Project case relationships as knowledge edges. The relation string is preserved.
+
+    Observed and inferred relationships stay distinct. A missing evidence reference
+    is recorded; it is not invented. Ambiguous entity names are not linked.
+    """
+    relationships = sorted(
+        getattr(investigation, "relationships", []) or [],
+        key=lambda item: (item.relation_type, item.source_id, item.target_id, item.id),
+    )
+    evidence_by_id = {
+        item.id: item for item in investigation.evidence_store.list_all()
+    }
+    for relationship in relationships:
+        source_id = _node_for_relationship_ref(graph, investigation, relationship.source_id)
+        target_id = _node_for_relationship_ref(graph, investigation, relationship.target_id)
+        if not source_id or not target_id:
+            continue
+        support = list(relationship.supporting_evidence_ids)
+        first = evidence_by_id.get(support[0]) if support else None
+        metadata = {
+            "case_relation_type": relationship.relation_type,
+            "case_relationship_id": relationship.id,
+        }
+        if not support:
+            metadata["supporting_evidence_missing"] = True
+        edge = KnowledgeEdge(
+            edge_id=f"edge-rel-{relationship.id}",
+            source_node_id=source_id,
+            target_node_id=target_id,
+            relationship_type=relationship.relation_type,
+            created_at=relationship.created_at,
+            valid_from=relationship.created_at,
+            status=EdgeStatus.ACTIVE,
+            confidence=relationship.confidence,
+            epistemic_nature="INFERENCE" if relationship.is_inferred else "OBSERVATION",
+            supporting_evidence_ids=support,
+            originating_specialist=getattr(getattr(first, "provenance", None), "specialist_id", None),
+            capability_id=getattr(getattr(first, "provenance", None), "capability_id", None),
+            capability_version=(first.metadata.get("capability_version") if first else None),
+            authorization_decision_id=(first.metadata.get("authorization_decision_id") if first else None),
+            investigation_id=investigation.id,
+            case_id=getattr(investigation, "case_id", ""),
+            is_counterfactual=graph.is_counterfactual,
+            branch_id=graph.branch_id,
+            metadata=metadata,
+        ).seal()
+        graph.add_edge(edge)
+
+
 class KnowledgeMaterializer:
     """Deterministically transforms authoritative investigation state into a verified Knowledge Graph view."""
 
@@ -149,6 +218,8 @@ class KnowledgeMaterializer:
                 metadata={"subject": ent.name, "entity_type": ent.type, "entity_id": ent.id},
             ).seal()
             graph.add_node(case_ent_node)
+
+        _materialize_case_relationships(graph, investigation)
 
         # 2. Materialize Hypotheses
         hypotheses = sorted(
