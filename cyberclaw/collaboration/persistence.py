@@ -2,23 +2,46 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from cyberclaw.collaboration.conflicts import ConflictManager
+from typing import Any, Dict, List
 from cyberclaw.collaboration.coordinator import CollaborationCoordinator
+from cyberclaw.collaboration.errors import CollaborationPersistenceError
 from cyberclaw.collaboration.models import (
     CollaborationRequest,
     CollaborationStatus,
-    ConflictStatus,
-    ConflictType,
-    ContextSensitivity,
     SpecialistConflict,
 )
 
 
+def _digest_texts(*parts: str) -> str:
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _read_json(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise CollaborationPersistenceError(
+            f"Collaboration file is empty: {path.name}",
+            corruption_class="TRUNCATION",
+        )
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        tail = text.rstrip()[-1:] if text.rstrip() else ""
+        kind = "TRUNCATION" if tail not in ("}", "]") else "INVALID_JSON"
+        raise CollaborationPersistenceError(
+            f"Collaboration file {path.name} is not valid JSON: {exc}",
+            corruption_class=kind,
+        ) from exc
+
+
 class CollaborationPersistenceManager:
-    """Manages atomic serialization and loading of collaboration requests and conflict history."""
+    """Manages atomic serialization and loading of collaboration requests and conflict history.
+
+    Corruption is reported by class and does not partially replace in-memory requests.
+    """
 
     @staticmethod
     def _atomic_write(file_path: Path, data: str) -> None:
@@ -39,24 +62,15 @@ class CollaborationPersistenceManager:
         collab_dir = base_dir / "collaboration"
         collab_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Requests
-        requests_data = [
-            req.model_dump(mode="json")
-            for req in coordinator._requests.values()
-        ]
+        requests_data = [req.model_dump(mode="json") for req in coordinator._requests.values()]
+        conflicts_data = [conf.model_dump(mode="json") for conf in coordinator.conflict_manager.list_conflicts()]
+        requests_text = json.dumps(requests_data, indent=2, default=str)
+        conflicts_text = json.dumps(conflicts_data, indent=2, default=str)
+        cls._atomic_write(collab_dir / "requests.json", requests_text)
+        cls._atomic_write(collab_dir / "conflicts.json", conflicts_text)
         cls._atomic_write(
-            collab_dir / "requests.json",
-            json.dumps(requests_data, indent=2, default=str),
-        )
-
-        # 2. Conflicts
-        conflicts_data = [
-            conf.model_dump(mode="json")
-            for conf in coordinator.conflict_manager.list_conflicts()
-        ]
-        cls._atomic_write(
-            collab_dir / "conflicts.json",
-            json.dumps(conflicts_data, indent=2, default=str),
+            collab_dir / "digest.json",
+            json.dumps({"digest": _digest_texts(requests_text, conflicts_text)}, indent=2),
         )
 
     @classmethod
@@ -65,29 +79,70 @@ class CollaborationPersistenceManager:
         coordinator: CollaborationCoordinator,
         base_dir: Path,
     ) -> bool:
-        """Load persisted requests and conflicts into coordinator."""
+        """Load persisted requests and conflicts. Missing files mean no state. Corruption raises."""
         collab_dir = base_dir / "collaboration"
         req_file = collab_dir / "requests.json"
         conf_file = collab_dir / "conflicts.json"
+        digest_file = collab_dir / "digest.json"
 
         if not req_file.exists():
             return False
+        if not conf_file.exists() or not digest_file.exists():
+            raise CollaborationPersistenceError(
+                "Collaboration history is incomplete. Refusing to load a partial record.",
+                corruption_class="MISSING_RECORD",
+            )
 
-        try:
-            with open(req_file, "r", encoding="utf-8") as f:
-                reqs = json.load(f)
-                for r in reqs:
-                    request = CollaborationRequest(**r)
-                    coordinator._requests[request.request_id] = request
-                    if request.status == CollaborationStatus.COMPLETED:
-                        coordinator._resolved_ids.add(request.request_id)
+        requests_text = req_file.read_text(encoding="utf-8")
+        conflicts_text = conf_file.read_text(encoding="utf-8")
+        requests_data = _read_json(req_file)
+        conflicts_data = _read_json(conf_file)
+        digest_data = _read_json(digest_file)
+        if not isinstance(requests_data, list) or not isinstance(conflicts_data, list):
+            raise CollaborationPersistenceError(
+                "Collaboration persistence schema is invalid.",
+                corruption_class="INVALID_SCHEMA",
+            )
+        if not isinstance(digest_data, dict) or "digest" not in digest_data:
+            raise CollaborationPersistenceError(
+                "Collaboration digest file is invalid.",
+                corruption_class="INVALID_SCHEMA",
+            )
+        actual = _digest_texts(requests_text, conflicts_text)
+        if actual != digest_data["digest"]:
+            raise CollaborationPersistenceError(
+                "Collaboration persistence digest mismatch. Refusing to load corrupted state.",
+                corruption_class="DIGEST_MISMATCH",
+            )
 
-            if conf_file.exists():
-                with open(conf_file, "r", encoding="utf-8") as f:
-                    confs = json.load(f)
-                    for c in confs:
-                        conflict = SpecialistConflict(**c)
-                        coordinator.conflict_manager.register_conflict(conflict)
-            return True
-        except Exception:
-            return False
+        parsed_requests: List[CollaborationRequest] = []
+        for index, body in enumerate(requests_data):
+            if not isinstance(body, dict) or not body.get("request_id"):
+                raise CollaborationPersistenceError(
+                    f"Collaboration request {index} is missing request_id.",
+                    corruption_class="INVALID_SCHEMA",
+                )
+            try:
+                parsed_requests.append(CollaborationRequest.model_validate(body))
+            except Exception as exc:
+                raise CollaborationPersistenceError(
+                    f"Collaboration request {index} failed schema validation: {exc}",
+                    corruption_class="INVALID_SCHEMA",
+                ) from exc
+        parsed_conflicts: List[SpecialistConflict] = []
+        for index, body in enumerate(conflicts_data):
+            try:
+                parsed_conflicts.append(SpecialistConflict.model_validate(body))
+            except Exception as exc:
+                raise CollaborationPersistenceError(
+                    f"Collaboration conflict {index} failed schema validation: {exc}",
+                    corruption_class="INVALID_SCHEMA",
+                ) from exc
+
+        for request in parsed_requests:
+            coordinator._requests[request.request_id] = request
+            if request.status == CollaborationStatus.COMPLETED:
+                coordinator._resolved_ids.add(request.request_id)
+        for conflict in parsed_conflicts:
+            coordinator.conflict_manager.register_conflict(conflict)
+        return True

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List
 from cyberclaw.runtime.idempotency import IdempotencyRegistry
 from cyberclaw.runtime.models import (
     ExecutionState,
@@ -10,7 +10,6 @@ from cyberclaw.runtime.models import (
     TaskStatus,
 )
 from cyberclaw.runtime.queue import DurableTaskQueue
-from cyberclaw.runtime.state import TaskLifecycleDFA
 
 
 class RecoveryReport:
@@ -34,6 +33,13 @@ class RecoveryReport:
 class RuntimeRecoveryManager:
     """Reconciles in-flight and interrupted tasks upon process restart."""
 
+    _CLAIMED = (
+        TaskStatus.VALIDATING,
+        TaskStatus.AUTHORIZED,
+        TaskStatus.DISPATCHED,
+        TaskStatus.RUNNING,
+    )
+
     @classmethod
     def recover(
         cls,
@@ -42,44 +48,69 @@ class RuntimeRecoveryManager:
     ) -> RecoveryReport:
         """Inspect durable queue and idempotency state, determining safe next actions."""
         report = RecoveryReport()
-        all_tasks = queue.list_tasks()
-
-        for task in all_tasks:
-            # 1. Tasks claimed but never executed (crashed before execution)
-            if task.status in (TaskStatus.VALIDATING, TaskStatus.AUTHORIZED, TaskStatus.DISPATCHED):
-                if task.execution_state == ExecutionState.UNSTARTED:
-                    task.claimed_by_worker = None
-                    task.claim_expires_at = None
-                    task.status = TaskStatus.QUEUED
-                    report.requeued_unstarted.append(task.task_id)
-                    continue
-
-            # 2. Tasks interrupted while RUNNING
-            if task.status == TaskStatus.RUNNING:
-                # Check if execution actually succeeded before worker died (crash before ack)
-                existing = idempotency.get_existing_execution(task.idempotency_key)
-                if existing:
-                    # Reconcile completed state without re-running
-                    task.execution_state = ExecutionState.COMPLETED
-                    queue.ack(task.task_id, result=existing.get("result"))
-                    report.reconciled_completed.append(task.task_id)
-                    continue
-
-                # Execution was in progress and result is unrecorded
-                task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+        for task in queue.list_tasks():
+            if task.status not in cls._CLAIMED:
+                continue
+            if (
+                task.status in (TaskStatus.VALIDATING, TaskStatus.AUTHORIZED, TaskStatus.DISPATCHED)
+                and task.execution_state == ExecutionState.UNSTARTED
+            ):
                 task.claimed_by_worker = None
                 task.claim_expires_at = None
-
-                # Non-consequential (read-only / reversible) tasks may be safely retried
-                is_safe_scope = task.action_scope.lower() in ("read_only", "informational", "reversible")
-                if is_safe_scope and task.retry_count < task.retry_policy.max_retries:
-                    queue.fail(task.task_id, "Worker crashed during in-flight execution", failure_type="WORKER_CRASH")
-                    if queue.schedule_retry(task.task_id):
-                        report.retried_reversible.append(task.task_id)
-                        continue
-
-                # Consequential or destructive tasks MUST NOT be blindly re-executed
-                queue.fail(task.task_id, "Worker crashed during execution; provider state unknown", failure_type="UNKNOWN_EXECUTION_STATE")
-                report.flagged_unknown.append(task.task_id)
-
+                task.status = TaskStatus.QUEUED
+                report.requeued_unstarted.append(task.task_id)
+                continue
+            cls._reconcile_interrupted(task, queue, idempotency, report)
         return report
+
+    @classmethod
+    def _reconcile_interrupted(
+        cls,
+        task: RuntimeTask,
+        queue: DurableTaskQueue,
+        idempotency: IdempotencyRegistry,
+        report: RecoveryReport,
+    ) -> None:
+        """Close an interrupted attempt without inventing a provider result."""
+        existing = idempotency.get_existing_execution(task.idempotency_key)
+        if existing and task.status == TaskStatus.RUNNING:
+            task.execution_state = ExecutionState.COMPLETED
+            queue.ack(task.task_id, result=existing.get("result"))
+            report.reconciled_completed.append(task.task_id)
+            return
+
+        task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+        task.claimed_by_worker = None
+        task.claim_expires_at = None
+
+        if existing and task.status != TaskStatus.RUNNING:
+            queue.fail(
+                task.task_id,
+                "Execution record exists but the acknowledgement boundary was not reached",
+                failure_type="UNKNOWN_EXECUTION_STATE",
+            )
+            task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+            report.flagged_unknown.append(task.task_id)
+            return
+
+        is_safe_scope = task.action_scope.lower() in ("read_only", "informational", "reversible")
+        if is_safe_scope and task.retry_count < task.retry_policy.max_retries:
+            queue.fail(
+                task.task_id,
+                "Worker crashed during in-flight execution",
+                failure_type="WORKER_CRASH",
+            )
+            # The interrupted attempt is closed. The retry is a new unstarted attempt.
+            task.execution_state = ExecutionState.UNSTARTED
+            if queue.schedule_retry(task.task_id):
+                report.retried_reversible.append(task.task_id)
+                return
+
+        if task.status != TaskStatus.FAILED:
+            queue.fail(
+                task.task_id,
+                "Worker crashed during execution; provider state unknown",
+                failure_type="UNKNOWN_EXECUTION_STATE",
+            )
+        task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+        report.flagged_unknown.append(task.task_id)

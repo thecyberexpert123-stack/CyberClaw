@@ -13,6 +13,17 @@ DEFAULT_POLICY_ID = "default-system-policy"
 DEFAULT_POLICY_VERSION = "1.0.0"
 
 
+def _semantic_version_key(version: str) -> tuple:
+    """Order policy versions numerically so 1.10.0 is newer than 1.9.0."""
+    parts = []
+    for piece in version.split("."):
+        try:
+            parts.append((0, int(piece)))
+        except ValueError:
+            parts.append((1, piece))
+    return tuple(parts)
+
+
 class PolicyRegistry:
     """Registry maintaining immutable, versioned authorization policies."""
 
@@ -82,8 +93,9 @@ class PolicyRegistry:
                 )
             return versions_map[v_clean]
 
-        # Get latest version (fallback to last sorted)
-        sorted_versions = sorted(versions_map.keys())
+        # Latest means highest semantic version, not lexicographic order.
+        # "1.10.0" must outrank "1.9.0".
+        sorted_versions = sorted(versions_map.keys(), key=_semantic_version_key)
         return versions_map[sorted_versions[-1]]
 
     def get_default_policy(self) -> Policy:

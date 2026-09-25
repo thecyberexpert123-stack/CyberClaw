@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cyberclaw.branching.errors import BranchIntegrityError
 from cyberclaw.branching.models import (
     BranchJournalEntry,
     BranchStatus,
@@ -126,7 +127,11 @@ class BranchPersistence:
             bid = item["branch_id"]
             b_dir = layout.branches / f"branch_{bid}"
             if not b_dir.exists():
-                continue
+                raise BranchIntegrityError(
+                    f"Branch index references '{bid}' but its directory is missing. "
+                    "Refusing to silently drop historical branch state.",
+                    branch_id=bid,
+                )
 
             meta = json.loads(workspace.read_text(b_dir / "metadata.json"))
             journal_raw = json.loads(workspace.read_text(b_dir / "journal.json"))

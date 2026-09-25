@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
-from cyberclaw.capabilities.capability import Capability
 from cyberclaw.capabilities.provider import ExecutionContext
 from cyberclaw.capabilities.registry import CapabilityRegistry
 from cyberclaw.case.models import JournalEntryType
@@ -104,12 +103,13 @@ class RuntimeExecutor:
         # 3. Capability Resolution & Lifecycle / Trust Verification
         capability = self.capabilities.get_capability(task.capability_id)
         if not capability:
-            capability = Capability(
-                id=task.capability_id,
-                name=task.capability_id,
-                description="Dynamically resolved capability",
+            # A queued task must not manufacture a capability. Existence is not authority.
+            self.queue.reject(task.task_id, reason="UNREGISTERED_CAPABILITY")
+            raise RuntimeValidationError(
+                f"Capability '{task.capability_id}' is not registered. Runtime will not create it.",
+                task_id=task.task_id,
+                investigation_id=task.investigation_id,
             )
-            self.capabilities.register_capability(capability)
 
         executable, unexecutable_reason = capability.is_executable()
         if not executable:
@@ -217,9 +217,30 @@ class RuntimeExecutor:
         try:
             result, resolved_subsystem = self.dispatcher.dispatch(task, exec_ctx)
         except ProviderExecutionError as pee:
+            # An exception during dispatch does not prove the provider did not run.
             task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
-            self.queue.fail(task.task_id, pee.message, failure_type="PROVIDER_TEMPORARY_FAILURE" if pee.is_retryable else "PROVIDER_FAILURE")
+            self.queue.fail(
+                task.task_id,
+                pee.message,
+                failure_type="UNKNOWN_EXECUTION_STATE",
+            )
             raise
+
+        # The capability registry converts provider exceptions into failure results.
+        # That is not the same as a provider returning a known failure. Do not retry it.
+        if result.is_failure and result.error_code == "PROVIDER_EXECUTION_EXCEPTION":
+            task.execution_state = ExecutionState.UNKNOWN_EXECUTION_STATE
+            self.queue.fail(
+                task.task_id,
+                result.error or "Provider raised during execution; provider state unknown",
+                failure_type="UNKNOWN_EXECUTION_STATE",
+            )
+            raise ProviderExecutionError(
+                f"Provider exception during capability '{task.capability_id}': {result.error}",
+                task_id=task.task_id,
+                investigation_id=task.investigation_id,
+                is_retryable=False,
+            )
 
         # Check deadline exceeded during execution
         if task.deadline and utc_now() > task.deadline:

@@ -82,7 +82,22 @@ class ConflictProcessingError(CollaborationError):
 
 class CollaborationPersistenceError(CollaborationError):
     """Raised when collaboration state fails atomic disk persistence or deserialization."""
-    pass
+
+    def __init__(
+        self,
+        message: str,
+        request_id: Optional[str] = None,
+        investigation_id: Optional[str] = None,
+        specialist_id: Optional[str] = None,
+        corruption_class: str = "UNSPECIFIED",
+    ) -> None:
+        super().__init__(
+            message,
+            request_id=request_id,
+            investigation_id=investigation_id,
+            specialist_id=specialist_id,
+        )
+        self.corruption_class = corruption_class
 
 
 class CollaborationStateTransitionError(CollaborationError):

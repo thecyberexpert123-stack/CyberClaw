@@ -7,6 +7,7 @@ import threading
 from typing import Any, Dict, List, Optional
 from cyberclaw.runtime.errors import ConcurrencyConflictError, QueueError
 from cyberclaw.runtime.models import (
+    ExecutionState,
     RuntimeTask,
     TaskPriority,
     TaskStatus,
@@ -118,6 +119,10 @@ class DurableTaskQueue:
             if task.status != TaskStatus.FAILED and task.status != TaskStatus.TIMED_OUT:
                 return False
 
+            if task.execution_state == ExecutionState.UNKNOWN_EXECUTION_STATE:
+                # Unknown provider state must not be blindly replayed, even if the
+                # failure type would otherwise be retryable.
+                return False
             if task.retry_count >= task.retry_policy.max_retries:
                 return False
             if not task.retry_policy.is_retryable(task.failure_type, task.action_scope):
@@ -204,7 +209,10 @@ class DurableTaskQueue:
                 and task.claim_expires_at
                 and task.claim_expires_at < now
             ):
-                # Worker crashed or abandoned before running
+                # A lease expiry is not authority to replay work that may already
+                # have reached a provider. Leave non-unstarted tasks for recovery.
+                if task.execution_state != ExecutionState.UNSTARTED:
+                    continue
                 task.claimed_by_worker = None
                 task.claim_expires_at = None
                 task.status = TaskStatus.QUEUED

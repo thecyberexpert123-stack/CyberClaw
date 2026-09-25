@@ -72,8 +72,21 @@ class StateTransitionError(RuntimeBaseError):
 
 
 class PersistenceError(RuntimeBaseError):
-    """Raised on atomic persistence or serialization failures."""
-    pass
+    """Raised on atomic persistence or serialization failures.
+
+    corruption_class distinguishes truncation, schema failure, digest mismatch,
+    and missing records. Callers must not treat this as an empty queue.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        task_id: Optional[str] = None,
+        investigation_id: Optional[str] = None,
+        corruption_class: str = "UNSPECIFIED",
+    ) -> None:
+        super().__init__(message, task_id=task_id, investigation_id=investigation_id)
+        self.corruption_class = corruption_class
 
 
 class RecoveryError(RuntimeBaseError):

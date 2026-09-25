@@ -2,6 +2,23 @@
 
 This document records verified engineering experiences, architectural lessons, and operational findings accumulated across milestones in the CyberClaw greenfield implementation.
 
+## Milestone: Adversarial Invariant & Chaos Validation v0.1
+
+### Lesson 27: A Swallowed Load Error Is a Silent Rewrite
+- **Observation**: Runtime and collaboration loaders returned `False` for truncated JSON, invalid schema, and missing companion records. A caller could not tell "no state" from "corrupt state", and a partial loop could mutate memory before the exception was swallowed.
+- **Consequence**: The next save would replace authoritative history with an empty or partial queue, which is a repair performed by accident.
+- **Resolution**: Load parses and validates the whole document before import. Missing companion records and digest mismatches raise a classified error. The in-memory store is left unchanged.
+
+### Lesson 28: Lease Expiry Is Not Permission to Replay
+- **Observation**: An expired claim on a dispatched task whose execution had already started was returned to the queue. Separately, a provider exception was converted into a failure result and then retried because the error text contained "timeout".
+- **Consequence**: A consequential action could run twice after the system had lost track of whether the provider had already acted. Recovery's unknown-state rule was bypassed by a different code path.
+- **Resolution**: Lease reclaim leaves non-unstarted claims for recovery. `schedule_retry` refuses `UNKNOWN_EXECUTION_STATE`. A `PROVIDER_EXECUTION_EXCEPTION` is unknown execution, not a known temporary failure. Reversible worker crashes still use the existing governed retry after the interrupted attempt is closed.
+
+### Lesson 29: Today's Policy Must Not Be Yesterday's Decision
+- **Observation**: Selecting the "latest" policy by string sort made `1.9.0` newer than `1.10.0`. Replay, however, already copied recorded decisions and did not call the policy engine.
+- **Consequence**: Current authorization could pick the wrong policy version, while a careless replay implementation could have re-authorized history under that wrong version.
+- **Resolution**: Latest version is semantic. Chaos scenarios record an ALLOW under version A, install a DENY as a later version, and replay. The reconstructed decision stays ALLOW, and the policy engine is not called during replay. The reverse, historical DENY under a later ALLOW, holds as well.
+
 ## Milestone: Cross-Case Experience & Investigation Strategy Learning v0.1
 
 ### Lesson 24: Experience Is a Reference, Not a Second Source of Truth

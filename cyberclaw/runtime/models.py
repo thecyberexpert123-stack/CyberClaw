@@ -93,6 +93,7 @@ class RetryPolicy(BaseModel):
             "RETIRED_CAPABILITY",
             "REVOKED_CAPABILITY",
             "DESTRUCTIVE_APPROVAL_MISSING",
+            "UNKNOWN_EXECUTION_STATE",
         ]
     )
 

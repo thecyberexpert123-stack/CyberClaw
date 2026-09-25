@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] - 2026-09-24
 
+### Added - Adversarial Invariant & Chaos Validation v0.1
+- **`cyberclaw/chaos/`**: Deterministic, domain-neutral fault injection, invariant registry, interleaving harness, corruption classifier, and diagnosable scenario reports. The framework does not execute shells, open networks, approve strategies, or replace replay, policy, or persistence.
+- **Cross-subsystem scenarios**: runtime crash → recovery → replay → knowledge reconstruction → learning reconstruction; policy-version time travel; branch → learning isolation; collaboration, idempotency, and temporal knowledge attacks.
+- **Crash-at-boundary classification**: simulated crashes at validation, authorization, dispatch, provider, evidence, journal, and acknowledgement boundaries. Unknown execution stays unknown. Not every crash is treated as recoverable.
+- **Architectural corrections**: runtime and collaboration persistence fail closed with a corruption class and do not partial-import; missing branch directories are not silently dropped; policy latest-version selection is semantic; the durable runtime does not create unregistered capabilities; expired leases and `schedule_retry` cannot replay `UNKNOWN_EXECUTION_STATE`; provider exceptions converted into results are not retried as known temporary failures.
+- **Tests**: 60 new deterministic tests. Full suite is 447 passed.
+
 ### Added - Cross-Case Experience & Investigation Strategy Learning v0.1
 - **`cyberclaw/learning/`**: Domain-neutral learning package. Experience is extracted from authoritative history, normalized with source lineage, clustered by source family, and grouped by exact versioned signatures. Patterns do not become strategies, strategies do not execute, and the learning engine cannot approve itself.
 - **Experience and provenance**: `InvestigationExperience` retains journal, evidence, requirement, hypothesis, contradiction, execution, and authorization references. Missing knowledge-graph history is recorded as absent rather than invented. Extraction does not append to the case journal.

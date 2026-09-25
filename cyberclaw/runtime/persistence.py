@@ -2,15 +2,45 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
+from cyberclaw.runtime.errors import PersistenceError
 from cyberclaw.runtime.idempotency import IdempotencyRegistry
+from cyberclaw.runtime.models import RuntimeTask
 from cyberclaw.runtime.queue import DurableTaskQueue
 
 
+def _digest_texts(*parts: str) -> str:
+    raw = "\n".join(parts).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _read_json(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        raise PersistenceError(
+            f"Runtime persistence file is empty: {path.name}",
+            corruption_class="TRUNCATION",
+        )
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        tail = text.rstrip()[-1:] if text.rstrip() else ""
+        kind = "TRUNCATION" if tail not in ("}", "]") else "INVALID_JSON"
+        raise PersistenceError(
+            f"Runtime persistence file {path.name} is not valid JSON: {exc}",
+            corruption_class=kind,
+        ) from exc
+
+
 class RuntimePersistenceManager:
-    """Manages atomic serialization and loading of runtime queue and idempotency records."""
+    """Manages atomic serialization and loading of runtime queue and idempotency records.
+
+    A present but unreadable record is corruption, not an empty queue. Loading
+    validates the full document before mutating in-memory state.
+    """
 
     @staticmethod
     def _atomic_write(file_path: Path, data: str) -> None:
@@ -32,18 +62,15 @@ class RuntimePersistenceManager:
         runtime_dir = base_dir / "runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Queue tasks
         queue_data = queue.export_state()
-        cls._atomic_write(
-            runtime_dir / "queue.json",
-            json.dumps(queue_data, indent=2, default=str),
-        )
-
-        # 2. Idempotency registry
         idemp_data = idempotency.export_state()
+        queue_text = json.dumps(queue_data, indent=2, default=str)
+        idemp_text = json.dumps(idemp_data, indent=2, default=str)
+        cls._atomic_write(runtime_dir / "queue.json", queue_text)
+        cls._atomic_write(runtime_dir / "idempotency.json", idemp_text)
         cls._atomic_write(
-            runtime_dir / "idempotency.json",
-            json.dumps(idemp_data, indent=2, default=str),
+            runtime_dir / "digest.json",
+            json.dumps({"digest": _digest_texts(queue_text, idemp_text)}, indent=2),
         )
 
     @classmethod
@@ -53,23 +80,60 @@ class RuntimePersistenceManager:
         idempotency: IdempotencyRegistry,
         base_dir: Path,
     ) -> bool:
-        """Load persisted runtime state into queue and idempotency registry if present."""
+        """Load persisted runtime state. Missing files mean no state. Corruption raises."""
         runtime_dir = base_dir / "runtime"
         queue_file = runtime_dir / "queue.json"
         idemp_file = runtime_dir / "idempotency.json"
+        digest_file = runtime_dir / "digest.json"
 
         if not queue_file.exists():
             return False
+        if not idemp_file.exists():
+            raise PersistenceError(
+                "Idempotency record is missing while a runtime queue exists. Refusing to load.",
+                corruption_class="MISSING_RECORD",
+            )
+        if not digest_file.exists():
+            raise PersistenceError(
+                "Runtime digest is missing. Refusing to treat unverified history as valid.",
+                corruption_class="MISSING_RECORD",
+            )
 
-        try:
-            with open(queue_file, "r", encoding="utf-8") as f:
-                queue_data = json.load(f)
-                queue.import_state(queue_data)
+        queue_text = queue_file.read_text(encoding="utf-8")
+        idemp_text = idemp_file.read_text(encoding="utf-8")
+        queue_data = _read_json(queue_file)
+        idemp_data = _read_json(idemp_file)
+        digest_data = _read_json(digest_file)
+        if not isinstance(queue_data, list):
+            raise PersistenceError("Runtime queue must be a list.", corruption_class="INVALID_SCHEMA")
+        if not isinstance(idemp_data, dict):
+            raise PersistenceError("Runtime idempotency record must be an object.", corruption_class="INVALID_SCHEMA")
+        if not isinstance(digest_data, dict) or "digest" not in digest_data:
+            raise PersistenceError("Runtime digest file is invalid.", corruption_class="INVALID_SCHEMA")
 
-            if idemp_file.exists():
-                with open(idemp_file, "r", encoding="utf-8") as f:
-                    idemp_data = json.load(f)
-                    idempotency.import_state(idemp_data)
-            return True
-        except Exception:
-            return False
+        actual = _digest_texts(queue_text, idemp_text)
+        if actual != digest_data["digest"]:
+            raise PersistenceError(
+                "Runtime persistence digest mismatch. Refusing to load corrupted state.",
+                corruption_class="DIGEST_MISMATCH",
+            )
+
+        parsed: List[RuntimeTask] = []
+        for index, item in enumerate(queue_data):
+            if not isinstance(item, dict) or not item.get("task_id") or not item.get("investigation_id"):
+                raise PersistenceError(
+                    f"Runtime queue item {index} is missing required identity fields.",
+                    corruption_class="INVALID_SCHEMA",
+                )
+            try:
+                parsed.append(RuntimeTask.model_validate(item))
+            except Exception as exc:
+                raise PersistenceError(
+                    f"Runtime queue item {index} failed schema validation: {exc}",
+                    corruption_class="INVALID_SCHEMA",
+                ) from exc
+
+        # Commit only after the full document validates. Never partial-import.
+        queue.import_state([task.model_dump(mode="json") for task in parsed])
+        idempotency.import_state(idemp_data)
+        return True

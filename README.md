@@ -149,12 +149,23 @@ CyberClaw/
 │   │   ├── registry.py         # Versioned registry, ledger, and event-sourced replay
 │   │   ├── persistence.py      # Atomic learning/registry.json with digest verification
 │   │   └── errors.py           # Learning exception taxonomy
+│   ├── chaos/                  # Adversarial Invariant & Chaos Validation v0.1
+│   │   ├── models.py           # Fault, invariant, digest, and report models
+│   │   ├── faults.py           # Deterministic in-process fault injection
+│   │   ├── invariants.py       # Explicit invariant registry and explanations
+│   │   ├── corruption.py       # Controlled file corruption and classification
+│   │   ├── scheduler.py        # Seeded interleaving without wall-clock races
+│   │   ├── scenarios.py        # Cross-subsystem failure chains
+│   │   ├── runner.py           # Boundary crash classification and repeat runs
+│   │   ├── reports.py          # Diagnosable scenario reports
+│   │   ├── persistence.py      # Chaos-report storage only; not case state
+│   │   └── errors.py           # Chaos framework exceptions
 │   ├── validation/             # Multi-phase Validation Pipeline
 │   │   ├── errors.py           # Schema, Policy, State, and Result validation errors
 │   │   └── pipeline.py         # ValidationPipeline
 │   └── observability/          # Structured Observability
 │       └── logger.py           # StructuredLogger & ObservabilityRecord
-├── tests/                      # 387 unit & integration tests covering all requirements
+├── tests/                      # 447 unit & integration tests covering all requirements
 └── pyproject.toml
 ```
 
@@ -748,7 +759,50 @@ v0.1 does not implement reinforcement learning, model fine-tuning, neural strate
 
 ---
 
-## 17. Running the Tests
+## 17. Adversarial Invariant & Chaos Validation v0.1
+
+This milestone does not make CyberClaw more capable. It tries to break the architecture that already exists and checks that authoritative state and security boundaries survive.
+
+```text
+Scenario
+  → deterministic fault
+  → existing subsystem
+  → recovery / replay / branch / learning
+  → invariant explanation
+  → structural digest
+```
+
+### Invariant Philosophy
+An invariant is a named boundary, not a score. `InvariantRegistry` records a stable id, subsystem, severity, what happened, what was expected, what was observed, and the boundary that was crossed. A failed scenario is diagnosable from the chaos report. `PASS`/`FAIL` alone is not the report.
+
+The catalog includes `INV-RUNTIME-001`, `INV-RUNTIME-002`, `INV-REPLAY-001`, `INV-POLICY-001`, `INV-BRANCH-001`, `INV-LEARNING-001`, `INV-PERSISTENCE-001`, `INV-JOURNAL-001`, `INV-COLLAB-001`, and `INV-KNOWLEDGE-001`.
+
+### Deterministic Fault Model
+`FaultInjector` applies an ordered `FaultSpec` schedule. The same schedule produces the same audit digest. Faults are in-process fixtures. The framework rejects payloads containing `eval`, `exec`, shell, or socket fragments. It does not open a network, run a shell, handle credentials, or mutate external systems.
+
+### Scenario Model
+A scenario has an id, a recorded seed, ordered actions, injected faults, invariant results, recovery and replay results, and digest comparison. `ChaosRunner.run_twice` executes a scenario in two workspaces and compares the structural digest. That digest excludes wall-clock timestamps and generated identifiers, because existing subsystems stamp `utc_now()` and `uuid4()`. Within one run, snapshot, graph, and replay digests still use the existing cryptographic functions.
+
+### Recovery Semantics
+Crash-at-boundary checks place a task at a named boundary and call the existing `RuntimeRecoveryManager`. They do not execute providers. Classifications are explicit: requeued because execution never started, reconciled because an execution record already exists, reversible retry through the governed recovery path, unknown execution requiring governance, rejected and not retried, or already terminal. Not every crash is recoverable.
+
+### Architectural Corrections Found by Breaking the System
+* Runtime and collaboration loaders swallowed corruption and could import a partial record. They now validate the full document, require a digest, and raise a classified persistence error without importing.
+* A branch index entry whose directory is missing is no longer skipped. Load raises `BranchIntegrityError`.
+* Latest policy version is semantic. `1.10.0` outranks `1.9.0`. Historical replay still reads recorded decisions and does not call `PolicyEngine`.
+* The durable runtime no longer creates a capability because a task names one. An unregistered capability is rejected.
+* An expired lease no longer requeues a claimed task whose execution has started. `schedule_retry` refuses `UNKNOWN_EXECUTION_STATE`.
+* Provider exceptions that the capability registry converts into `PROVIDER_EXECUTION_EXCEPTION` are unknown execution, not a known temporary failure, and are not retried.
+
+### Known Limitations
+`CyberClawCore.execute_action` can still materialize a capability object when a specialist advertises an unregistered capability id. That path is the original routing contract. Changing it would break existing specialist tests, so the durable runtime is the boundary that was corrected. Reversible worker crashes with no execution record are still retried by the existing recovery path after the interrupted attempt is closed. Consequential and destructive unknown states are not. The chaos harness does not simulate a real multi-process cluster, a real clock, or an external provider.
+
+### Intentionally Untested
+Real network partitions, real credential stores, distributed consensus, and offensive external actions are out of scope. The framework must not become a second policy engine, replay engine, or persistence system.
+
+---
+
+## 18. Running the Tests
 
 Install dependencies and run the test suite:
 
